@@ -1,7 +1,7 @@
 """
 Editor Agent - 编辑打磨
 """
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from writeflow.agents.base import BaseAgent
 from writeflow.agents.claude_client import get_claude_client
 
@@ -41,9 +41,9 @@ EDITOR_SYSTEM_PROMPT = """你是一位批判性文章的编辑，你的职责不
 class EditorAgent(BaseAgent):
     """Editor Agent - 编辑打磨专家"""
 
-    def __init__(self, model: str = "claude-sonnet-4-6"):
-        super().__init__("editor", model)
-        self.client = get_claude_client()
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
+        self.client = get_claude_client(api_key=api_key, model=model)
+        super().__init__("editor", self.client.model)
 
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -1,7 +1,7 @@
 """
 Devil's Advocate Agent - 二级批判
 """
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import json
 from writeflow.agents.base import BaseAgent
 from writeflow.agents.claude_client import get_claude_client
@@ -52,9 +52,9 @@ DEVIL_ADVOCATE_SYSTEM_PROMPT = """你是一位永不满足的批判者。请对�
 class DevilAdvocateAgent(BaseAgent):
     """Devil's Advocate Agent - 二级批判专家"""
 
-    def __init__(self, model: str = "claude-opus-4-8", api_key: str = None):
-        super().__init__("devil_advocate", model)
-        self.client = get_claude_client(api_key)
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
+        self.client = get_claude_client(api_key=api_key, model=model)
+        super().__init__("devil_advocate", self.client.model)
 
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """

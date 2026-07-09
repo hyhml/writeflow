@@ -29,13 +29,13 @@ async def main():
         return
 
     if command == "start":
-        await cmd_start(args[1:])
+        return await cmd_start(args[1:])
     elif command == "submit":
-        await cmd_submit(args[1:])
+        return await cmd_submit(args[1:])
     elif command == "status":
-        await cmd_status(args[1:])
+        return await cmd_status(args[1:])
     elif command == "list":
-        await cmd_list(args[1:])
+        return await cmd_list(args[1:])
     else:
         print(f"Unknown command: {command}")
         print_help()
@@ -52,12 +52,13 @@ WriteFLow - 批判性深度稿件多Agent生产系统
 用法: writeflow <命令> [选项]
 
 命令:
-  start               启动后台服务
-  submit <主题>        提交一个新任务
+  start               检查当前运行配置
+  submit <主题>        立即生成一个新稿件
   status <任务ID>     查看任务状态
   list                列出所有任务
 
 示例:
+  writeflow start
   writeflow submit "当代资本主义的结构性矛盾"
   writeflow status abc123-def456
 
@@ -67,12 +68,17 @@ WriteFLow - 批判性深度稿件多Agent生产系统
 
 async def cmd_start(args):
     """启动服务"""
-    print("启动WriteFLow服务...")
     settings = get_settings()
-    print(f"配置: {settings.app_env}")
-    print(f"模型: {settings.claude_model}")
-    print("服务已启动（后台运行）")
-    print("使用 'writeflow submit <主题>' 提交任务")
+    print("WriteFLow 配置检查")
+    print("-" * 40)
+    print(f"环境: {settings.app_env}")
+    print(f"Provider: {settings.provider}")
+    print(f"模型: {settings.model}")
+    print(f"Base URL: {settings.base_url or '(provider default)'}")
+    print(f"API Key: {'已设置' if settings.api_key else '未设置'}")
+    print(f"最大轮次: {settings.max_rounds}")
+    print("\n使用 'writeflow submit <主题>' 立即生成稿件。")
+    return 0
 
 
 async def cmd_submit(args):
@@ -83,7 +89,15 @@ async def cmd_submit(args):
         return 1
 
     topic = " ".join(args)
+    settings = get_settings()
+    if not settings.api_key:
+        print("错误: 未找到模型 API Key")
+        print("请设置 DEEPSEEK_API_KEY、MINIMAX_API_KEY 或 WRITEFLOW_API_KEY。")
+        print("可以先执行 `writeflow start` 查看当前配置。")
+        return 1
+
     print(f"提交任务: {topic}")
+    print(f"Provider: {settings.provider} | Model: {settings.model}")
 
     orchestrator = Orchestrator()
     task_id = await orchestrator.submit_task(topic)
@@ -117,12 +131,14 @@ async def cmd_status(args):
     task_id = args[0]
     print(f"查看任务状态: {task_id}")
     print("(需要后台服务运行才能获取实时状态)")
+    return 0
 
 
 async def cmd_list(args):
     """列出任务"""
     print("任务列表:")
-    print("(需要后台服务运行才能获取实时列表)")
+    print("(当前版本为本地同步执行模式，尚未启用后台队列)")
+    return 0
 
 
 def cli_main():

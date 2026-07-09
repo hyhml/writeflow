@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "writeflow"
-version = "0.1.0"
-description = "批判性深度稿件多Agent生产系统"
+version = "0.2.0"
+description = "支持 DeepSeek/MiniMax/Anthropic 的批判性深度稿件多Agent生产系统"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -20,12 +20,15 @@ classifiers = [
 ]
 
 dependencies = [
-    "anthropic>=0.18.0",
-    "pydantic>=2.5.0",
-    "pydantic-settings>=2.1.0",
 ]
 
 [project.optional-dependencies]
+anthropic = [
+    "anthropic>=0.18.0",
+]
+queue = [
+    "redis>=5.0.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.23.0",
@@ -34,7 +37,7 @@ dev = [
 ]
 
 [project.scripts]
-writeflow = "writeflow.cli:main"
+writeflow = "writeflow.cli:cli_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

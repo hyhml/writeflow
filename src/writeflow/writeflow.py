@@ -16,6 +16,7 @@ from writeflow.agents.judge import JudgeAgent
 from writeflow.agents.editor import EditorAgent
 from writeflow.core.debate_graph import DebateGraph, DebateTurn, Criticism
 from writeflow.core.quality_gate import QualityGate, GateResult
+from writeflow.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -116,8 +117,8 @@ class WriteFlow:
 
     def __init__(
         self,
-        max_rounds: int = 5,
-        min_rounds: int = 2,
+        max_rounds: Optional[int] = None,
+        min_rounds: Optional[int] = None,
         api_key: Optional[str] = None,
     ):
         """
@@ -128,16 +129,17 @@ class WriteFlow:
             min_rounds: 最小讨论轮次
             api_key: Anthropic API Key（可选，从环境变量读取）
         """
-        self.max_rounds = max_rounds
-        self.min_rounds = min_rounds
+        settings = get_settings()
+        self.max_rounds = max_rounds or settings.max_rounds
+        self.min_rounds = min_rounds or settings.min_rounds
 
         # 初始化Agent
         self.agents = {
-            "researcher": ResearcherAgent(),
-            "writer": WriterAgent(),
-            "devil_advocate": DevilAdvocateAgent(),
-            "judge": JudgeAgent(),
-            "editor": EditorAgent(),
+            "researcher": ResearcherAgent(api_key=api_key),
+            "writer": WriterAgent(api_key=api_key),
+            "devil_advocate": DevilAdvocateAgent(api_key=api_key),
+            "judge": JudgeAgent(api_key=api_key),
+            "editor": EditorAgent(api_key=api_key),
         }
 
         # 质量Gate
@@ -390,7 +392,7 @@ class WriteFlow:
         })
 
         scores = self._parse_scores_from_result(result)
-        return self.gate.evaluate(scores)
+        return self.gate.evaluate(scores.to_dict())
 
     async def _edit_content(
         self,

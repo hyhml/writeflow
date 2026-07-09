@@ -16,6 +16,7 @@ from writeflow.agents.judge import JudgeAgent
 from writeflow.agents.editor import EditorAgent
 from writeflow.core.debate_graph import DebateGraph, DebateTurn, Criticism
 from writeflow.core.quality_gate import QualityGate, GateResult
+from writeflow.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +83,10 @@ class Orchestrator:
 
     def __init__(
         self,
-        max_rounds: int = 5,
-        min_rounds: int = 2,
+        max_rounds: Optional[int] = None,
+        min_rounds: Optional[int] = None,
     ):
+        settings = get_settings()
         # Agent实例
         self.agents = {
             "researcher": ResearcherAgent(),
@@ -98,8 +100,8 @@ class Orchestrator:
         self.gate = QualityGate()
 
         # 配置
-        self.max_rounds = max_rounds
-        self.min_rounds = min_rounds
+        self.max_rounds = max_rounds or settings.max_rounds
+        self.min_rounds = min_rounds or settings.min_rounds
 
         # 任务存储
         self.tasks: Dict[str, TaskContext] = {}

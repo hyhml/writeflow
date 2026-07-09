@@ -1,7 +1,7 @@
 """
 Researcher Agent - 素材收集
 """
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from writeflow.agents.base import BaseAgent
 from writeflow.agents.claude_client import get_claude_client
@@ -63,9 +63,9 @@ RESEARCHER_SYSTEM_PROMPT = """你是一位资料收集专家，专门为批判�
 class ResearcherAgent(BaseAgent):
     """Researcher Agent - 素材收集专家"""
 
-    def __init__(self, model: str = "claude-opus-4-8", api_key: str = None):
-        super().__init__("researcher", model)
-        self.client = get_claude_client(api_key)
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
+        self.client = get_claude_client(api_key=api_key, model=model)
+        super().__init__("researcher", self.client.model)
 
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """

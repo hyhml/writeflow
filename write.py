@@ -17,6 +17,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from writeflow import WriteFlow
+from writeflow.config import get_settings
 
 
 async def main():
@@ -26,8 +27,18 @@ async def main():
         sys.exit(1)
 
     topic = " ".join(sys.argv[1:])
+    settings = get_settings()
+
+    if not settings.api_key:
+        print("未找到模型 API Key。")
+        print("请在 .env 中配置，或在终端 export 对应变量：")
+        print("  DeepSeek: WRITEFLOW_PROVIDER=deepseek + DEEPSEEK_API_KEY")
+        print("  MiniMax:  WRITEFLOW_PROVIDER=minimax + MINIMAX_API_KEY")
+        print("  通用接口: WRITEFLOW_PROVIDER=openai_compatible + WRITEFLOW_API_KEY + WRITEFLOW_BASE_URL")
+        sys.exit(1)
 
     print(f"正在为主题「{topic}」创作批判性文章...")
+    print(f"Provider: {settings.provider} | Model: {settings.model}")
     print("-" * 50)
 
     wf = WriteFlow()

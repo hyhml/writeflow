@@ -9,7 +9,7 @@ import uuid
 class BaseAgent(ABC):
     """Agent基类"""
 
-    def __init__(self, name: str, model: str = "claude-opus-4-8"):
+    def __init__(self, name: str, model: str = ""):
         self.name = name
         self.model = model
 

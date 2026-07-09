@@ -1,7 +1,7 @@
 """
 Judge Agent - 质量评估
 """
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import json
 from writeflow.agents.base import BaseAgent
 from writeflow.agents.claude_client import get_claude_client
@@ -137,9 +137,9 @@ JUDGE_SYSTEM_PROMPT = """你是一位公正的质量裁判，负责评估批判�
 class JudgeAgent(BaseAgent):
     """Judge Agent - 质量评估专家"""
 
-    def __init__(self, model: str = "claude-opus-4-8"):
-        super().__init__("judge", model)
-        self.client = get_claude_client()
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
+        self.client = get_claude_client(api_key=api_key, model=model)
+        super().__init__("judge", self.client.model)
         self.dimensions = QUALITY_DIMENSIONS
 
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
