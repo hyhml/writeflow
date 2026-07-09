@@ -65,3 +65,36 @@ python write.py "测试主题"
 | 真实 API 调用 | 未执行，本版本自动化测试全部 mock，不消耗额度 |
 
 **结论**：v0.2.2 已补齐基础测试与 CI 配置，并将导出路径、评分 JSON 保存、模型响应解析等稳定性逻辑纳入自动化验证。
+
+## v0.2.3 (2026-07-09)
+
+**环境**：Windows Codex workspace, Python 3.14.6
+
+**目标**：增加 Agent 工作过程导出，并修复最终稿混入 `<think>`、模型自检结果、编辑说明的问题。
+
+**验证命令**：
+
+```bash
+python -m compileall -q write.py src tests
+python -m pytest -q
+python -m ruff check .
+```
+
+**运行结果**：
+
+| 项目 | 状态 |
+|------|------|
+| 版本号 | 0.2.3 |
+| 编译检查 | ✅ 通过 |
+| pytest | ✅ 25 passed |
+| ruff | ✅ All checks passed |
+
+**新增输出**：
+
+```text
+outputs/<主题>_<时间>.md
+outputs/<主题>_<时间>_scores.json
+outputs/<主题>_<时间>_trace/
+```
+
+**结论**：v0.2.3 让最终稿和 Agent 过程分离，最终 `.md` 默认保存清洗后的正文，原始 Editor 输出保存在 `_trace/final_editor_raw.md` 便于排查。

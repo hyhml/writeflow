@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -40,7 +40,7 @@ class DebateTurn:
     criticisms: List[Criticism] = field(default_factory=list)
     defenses: List[str] = field(default_factory=list)  # 辩护回应
     judge_assessment: Optional[dict] = None
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class DebateGraph:

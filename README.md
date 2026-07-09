@@ -64,6 +64,16 @@ python3 write.py "技术进步与社会不平等" -o
 
 这会在 `outputs/` 下生成 `.md` 稿件和对应的 `_scores.json` 评分记录。
 
+从 v0.2.3 开始，使用 `-o` 保存时还会生成同名 `_trace/` 文件夹，用来查看每个 Agent 的工作过程：
+
+```text
+outputs/主题_时间.md
+outputs/主题_时间_scores.json
+outputs/主题_时间_trace/
+```
+
+`_trace/` 中会包含 Researcher 素材、Writer 初稿、Devil Advocate 质疑、Writer 辩护、Judge 评分、Editor 原始输出和清洗后的最终稿。
+
 ## 开发与测试
 
 v0.2.2 开始，项目包含不依赖真实 API Key 的自动化测试。安装开发依赖后运行：
@@ -153,6 +163,8 @@ git push
 - `.env` 配置读取
 - DeepSeek / MiniMax / Anthropic / 通用 OpenAI-compatible 后端选择
 - `python3 write.py "主题" -o` 保存 `.md` 稿件和 `_scores.json` 评分记录
+- Agent 工作过程 `_trace/` 导出，便于查看每一步如何生成
+- 自动清理最终稿中的 `<think>`、模型自检说明和编辑过程文本
 - pytest 自动化测试与 GitHub Actions CI
 - WSL 下可安装、可导入、可通过 CLI 检查配置
 

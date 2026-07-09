@@ -17,6 +17,7 @@ class OutputPaths(NamedTuple):
 
     article: Optional[Path]
     scores: Optional[Path]
+    trace: Optional[Path]
 
 
 def project_root() -> Path:
@@ -42,6 +43,12 @@ def score_path_for(article_path: Path) -> Path:
     return article_path.with_name(f"{article_path.stem}_scores.json")
 
 
+def trace_dir_for(article_path: Path) -> Path:
+    """Return the trace output directory for an article file."""
+
+    return article_path.with_name(f"{article_path.stem}_trace")
+
+
 def build_output_paths(
     topic: str,
     output_arg: Optional[str],
@@ -52,7 +59,7 @@ def build_output_paths(
     """Resolve article and score paths from the CLI --output argument."""
 
     if output_arg is None:
-        return OutputPaths(article=None, scores=None)
+        return OutputPaths(article=None, scores=None, trace=None)
 
     if output_arg == AUTO_OUTPUT:
         timestamp = (now or datetime.now()).strftime("%Y%m%d_%H%M%S")
@@ -61,7 +68,43 @@ def build_output_paths(
     else:
         article_path = Path(output_arg)
 
-    return OutputPaths(article=article_path, scores=score_path_for(article_path))
+    return OutputPaths(
+        article=article_path,
+        scores=score_path_for(article_path),
+        trace=trace_dir_for(article_path),
+    )
+
+
+def clean_final_article(content: str) -> str:
+    """Remove model process text and keep only the publishable article body."""
+
+    cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(
+        r"<thinking>.*?</thinking>",
+        "",
+        cleaned,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    first_heading = re.search(r"(?m)^#\s+", cleaned)
+    if first_heading:
+        cleaned = cleaned[first_heading.start():]
+
+    cutoff_markers = [
+        "\u3010\u950b\u5229\u5ea6\u68c0\u6d4b\u7ed3\u679c\u3011",
+        "\u3010\u9510\u5229\u5ea6\u68c0\u6d4b\u7ed3\u679c\u3011",
+        "\u3010\u950b\u5229\u5ea6\u68c0\u6d4b\u3011",
+        "\u3010\u7f16\u8f91\u8bf4\u660e\u3011",
+        "\u3010\u4fee\u6539\u8bf4\u660e\u3011",
+        "\u3010\u81ea\u68c0\u7ed3\u679c\u3011",
+    ]
+    cut_positions = [cleaned.find(marker) for marker in cutoff_markers]
+    cut_positions = [position for position in cut_positions if position >= 0]
+    if cut_positions:
+        cleaned = cleaned[:min(cut_positions)]
+
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip() + ("\n" if cleaned.strip() else "")
 
 
 def save_article(path: Path | str, content: str) -> Path:
@@ -71,6 +114,20 @@ def save_article(path: Path | str, content: str) -> Path:
     article_path.parent.mkdir(parents=True, exist_ok=True)
     article_path.write_text(content, encoding="utf-8")
     return article_path
+
+
+def _json_safe(value: Any) -> Any:
+    if hasattr(value, "to_dict"):
+        return _json_safe(value.to_dict())
+    if is_dataclass(value):
+        return _json_safe(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    return value
 
 
 def serialize_scores(scores: Any) -> dict[str, Any]:
@@ -141,3 +198,97 @@ def save_scores(
         encoding="utf-8",
     )
     return score_path
+
+
+def save_trace(
+    path: Path | str,
+    *,
+    topic: str,
+    result: Any,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> Path:
+    """Write trace files for a WriteResult-like object."""
+
+    trace_path = Path(path)
+    trace_path.mkdir(parents=True, exist_ok=True)
+
+    trace_events = [
+        _json_safe(event)
+        for event in getattr(result, "trace_events", [])
+    ]
+    manifest = {
+        "topic": topic,
+        "task_id": getattr(result, "task_id", ""),
+        "provider": provider,
+        "model": model,
+        "passed": bool(getattr(result, "passed", False)),
+        "pass_reason": getattr(result, "pass_reason", ""),
+        "rounds": getattr(result, "rounds", 0),
+        "trace_event_count": len(trace_events),
+    }
+    (trace_path / "00_manifest.json").write_text(
+        json.dumps(_json_safe(manifest), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    timeline_lines = [f"# Trace timeline: {topic}", ""]
+    for index, event in enumerate(trace_events, 1):
+        stage = event.get("stage", "unknown")
+        agent = event.get("agent", "unknown")
+        round_number = event.get("round")
+        timestamp = event.get("created_at", "")
+        suffix = f" round {round_number}" if round_number is not None else ""
+        timeline_lines.append(f"{index}. `{stage}` by `{agent}`{suffix} - {timestamp}")
+    (trace_path / "00_timeline.md").write_text(
+        "\n".join(timeline_lines).rstrip() + "\n",
+        encoding="utf-8",
+    )
+
+    for event in trace_events:
+        _write_trace_event(trace_path, event)
+
+    final_content = getattr(result, "content", "")
+    if final_content:
+        (trace_path / "final_article.md").write_text(final_content, encoding="utf-8")
+
+    return trace_path
+
+
+def _write_trace_event(trace_path: Path, event: dict[str, Any]) -> None:
+    stage = event.get("stage", "")
+    output = event.get("output") or {}
+    round_number = int(event.get("round") or 0)
+
+    if stage == "researcher_materials":
+        _write_json(trace_path / "01_researcher_materials.json", output)
+    elif stage == "writer_draft":
+        _write_markdown(
+            trace_path / f"round_{round_number:02d}_writer_draft.md",
+            output.get("content", ""),
+        )
+    elif stage == "devil_advocate_criticisms":
+        _write_json(
+            trace_path / f"round_{round_number:02d}_devil_advocate_criticisms.json",
+            output,
+        )
+    elif stage == "writer_defense":
+        _write_markdown(
+            trace_path / f"round_{round_number:02d}_writer_defense.md",
+            output.get("content", ""),
+        )
+    elif stage == "judge_result":
+        _write_json(trace_path / f"round_{round_number:02d}_judge_result.json", output)
+    elif stage == "editor_raw":
+        _write_markdown(trace_path / "final_editor_raw.md", output.get("raw_content", ""))
+
+
+def _write_json(path: Path, payload: Any) -> None:
+    path.write_text(
+        json.dumps(_json_safe(payload), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _write_markdown(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")

@@ -18,6 +18,7 @@ from writeflow.output import (
     build_output_paths,
     save_article,
     save_scores,
+    save_trace,
     slugify_topic,
 )
 
@@ -106,6 +107,7 @@ async def main() -> int:
     output_paths = build_output_paths(topic, args.output)
     article_path = output_paths.article
     scores_path = output_paths.scores
+    trace_path = output_paths.trace
 
     print(f"正在为主题《{topic}》创作批判性文章...")
     print(f"Provider: {settings.provider} | Model: {settings.model}")
@@ -136,7 +138,7 @@ async def main() -> int:
     print("\n=== 讨论轮次 ===")
     print(f"轮数: {result.rounds}")
 
-    if article_path and scores_path:
+    if article_path and scores_path and trace_path:
         saved_article = save_article(article_path, result.content)
         saved_scores = save_scores(
             scores_path,
@@ -145,8 +147,16 @@ async def main() -> int:
             provider=settings.provider,
             model=settings.model,
         )
+        saved_trace = save_trace(
+            trace_path,
+            topic=topic,
+            result=result,
+            provider=settings.provider,
+            model=settings.model,
+        )
         print(f"\n稿件已保存到: {saved_article}")
         print(f"评分已保存到: {saved_scores}")
+        print(f"Agent 过程已保存到: {saved_trace}")
 
     return 0
 

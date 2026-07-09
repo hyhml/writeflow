@@ -6,6 +6,7 @@ from __future__ import annotations
 import uuid
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from writeflow.agents.researcher import ResearcherAgent
@@ -16,6 +17,7 @@ from writeflow.agents.editor import EditorAgent
 from writeflow.core.debate_graph import DebateGraph, DebateTurn, Criticism
 from writeflow.core.quality_gate import QualityGate, GateResult
 from writeflow.config import get_settings
+from writeflow.output import clean_final_article
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +77,32 @@ class DebateSummary:
 
 
 @dataclass
+class TraceEvent:
+    """One observable step in the multi-agent workflow."""
+
+    stage: str
+    agent: str
+    round_number: Optional[int] = None
+    input_summary: Dict[str, Any] = field(default_factory=dict)
+    output: Any = field(default_factory=dict)
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "stage": self.stage,
+            "agent": self.agent,
+            "round": self.round_number,
+            "input_summary": self.input_summary,
+            "output": self.output,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass
 class WriteResult:
     """写作结果"""
     content: str
@@ -84,6 +112,7 @@ class WriteResult:
     debate_summary: DebateSummary
     rounds: int
     task_id: str
+    trace_events: List[TraceEvent] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -94,6 +123,7 @@ class WriteResult:
             "debate_summary": self.debate_summary.to_dict(),
             "rounds": self.rounds,
             "task_id": self.task_id,
+            "trace_events": [event.to_dict() for event in self.trace_events],
         }
 
 
@@ -166,11 +196,19 @@ class WriteFlow:
         """
         max_rounds = max_rounds or self.max_rounds
         task_id = str(uuid.uuid4())
+        trace_events: List[TraceEvent] = []
 
         logger.info(f"Task {task_id}: Starting write for topic: {topic}")
 
         # Phase 1: 素材收集
         materials = await self._collect_materials(task_id, topic)
+        self._record_trace(
+            trace_events,
+            stage="researcher_materials",
+            agent="researcher",
+            input_summary={"topic": topic},
+            output={"materials": materials},
+        )
 
         # Phase 2-N: 讨论循环
         debate_graph = DebateGraph()
@@ -185,22 +223,67 @@ class WriteFlow:
             content = await self._write_content(
                 task_id, topic, materials, round_num, content
             )
+            self._record_trace(
+                trace_events,
+                stage="writer_draft",
+                agent="writer",
+                round_number=round_num,
+                input_summary={
+                    "topic": topic,
+                    "materials_count": len(materials),
+                },
+                output={"content": content},
+            )
 
             # 2b: Devil's Advocate质疑
             criticisms = await self._criticize(
                 task_id, topic, content, materials, round_num, debate_graph
+            )
+            self._record_trace(
+                trace_events,
+                stage="devil_advocate_criticisms",
+                agent="devil_advocate",
+                round_number=round_num,
+                input_summary={
+                    "content_chars": len(content),
+                    "materials_count": len(materials),
+                },
+                output={"criticisms": criticisms},
             )
 
             # 2c: Writer辩护
             defenses = await self._defend(
                 task_id, content, criticisms, round_num
             )
+            self._record_trace(
+                trace_events,
+                stage="writer_defense",
+                agent="writer",
+                round_number=round_num,
+                input_summary={"criticisms_count": len(criticisms)},
+                output={"content": defenses},
+            )
 
             # 2d: Judge评估
-            gate_result = await self._judge(
+            gate_result, judge_output = await self._judge(
                 task_id, topic, content, criticisms, defenses, materials
             )
             current_scores = self._parse_scores(gate_result)
+            self._record_trace(
+                trace_events,
+                stage="judge_result",
+                agent="judge",
+                round_number=round_num,
+                input_summary={
+                    "content_chars": len(content),
+                    "criticisms_count": len(criticisms),
+                    "defense_chars": len(defenses),
+                },
+                output={
+                    "agent_result": judge_output,
+                    "gate_result": self._gate_result_to_dict(gate_result),
+                },
+            )
 
             # 检查是否通过
             if gate_result.passed:
@@ -215,9 +298,25 @@ class WriteFlow:
 
         # Phase N+1: Editor打磨
         if gate_result and gate_result.passed:
-            content = await self._edit_content(
+            editor_raw, content = await self._edit_content(
                 task_id, content, current_scores
             )
+            self._record_trace(
+                trace_events,
+                stage="editor_raw",
+                agent="editor",
+                input_summary={"source_content_chars": len(editor_raw)},
+                output={"raw_content": editor_raw, "clean_content": content},
+            )
+
+        content = clean_final_article(content)
+        self._record_trace(
+            trace_events,
+            stage="final_article",
+            agent="writeflow",
+            input_summary={"topic": topic},
+            output={"content": content},
+        )
 
         # 构建结果
         debate_summary = DebateSummary(
@@ -236,6 +335,7 @@ class WriteFlow:
             debate_summary=debate_summary,
             rounds=len(debate_graph.turns) if debate_graph.turns else 0,
             task_id=task_id,
+            trace_events=trace_events,
         )
 
     async def batch_write(
@@ -268,6 +368,7 @@ class WriteFlow:
                     debate_summary=DebateSummary(),
                     rounds=0,
                     task_id="",
+                    trace_events=[],
                 ))
         return results
 
@@ -379,7 +480,7 @@ class WriteFlow:
         criticisms: List[Dict],
         defenses: str,
         materials: List[Dict],
-    ) -> GateResult:
+    ) -> tuple[GateResult, Dict[str, Any]]:
         """评估阶段"""
         result = await self.agents["judge"].process({
             "task_id": task_id,
@@ -391,14 +492,14 @@ class WriteFlow:
         })
 
         scores = self._parse_scores_from_result(result)
-        return self.gate.evaluate(scores.to_dict())
+        return self.gate.evaluate(scores.to_dict()), result
 
     async def _edit_content(
         self,
         task_id: str,
         content: str,
         scores: QualityScores,
-    ) -> str:
+    ) -> tuple[str, str]:
         """编辑阶段"""
         result = await self.agents["editor"].process({
             "task_id": task_id,
@@ -407,7 +508,39 @@ class WriteFlow:
             "key_issues": scores.failed_dimensions(6.0),
             "criticisms": [],
         })
-        return result.get("content", content)
+        raw_content = result.get("content", content)
+        return raw_content, clean_final_article(raw_content)
+
+    def _record_trace(
+        self,
+        trace_events: List[TraceEvent],
+        *,
+        stage: str,
+        agent: str,
+        round_number: Optional[int] = None,
+        input_summary: Optional[Dict[str, Any]] = None,
+        output: Any = None,
+    ) -> None:
+        trace_events.append(
+            TraceEvent(
+                stage=stage,
+                agent=agent,
+                round_number=round_number,
+                input_summary=input_summary or {},
+                output=output or {},
+            )
+        )
+
+    def _gate_result_to_dict(self, gate_result: GateResult) -> Dict[str, Any]:
+        return {
+            "passed": gate_result.passed,
+            "reason": gate_result.reason,
+            "quality_scores": gate_result.quality_scores.scores,
+            "excellent_dimensions": gate_result.excellent_dimensions,
+            "failed_dimensions": gate_result.failed_dimensions,
+            "total_score": gate_result.total_score,
+            "recommendations": gate_result.recommendations,
+        }
 
     def _parse_scores(self, gate_result: GateResult) -> QualityScores:
         """从GateResult解析评分"""
