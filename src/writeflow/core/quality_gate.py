@@ -93,8 +93,6 @@ class QualityGate:
         excellent_dims = quality_scores.excellent_dimensions(8.0)
         failed_dims = quality_scores.failed_dimensions(4.0)
 
-        recommendations = []
-
         # 拒绝条件检查
         if failed_dims:
             return GateResult(

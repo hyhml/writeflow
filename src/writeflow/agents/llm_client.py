@@ -76,17 +76,17 @@ class ModelClient:
     def _require_api_key(self) -> str:
         if not self.settings.api_key:
             raise ModelClientError(
-                "Missing API key. Set WRITEFLOW_PROVIDER plus the matching key: "
-                "DEEPSEEK_API_KEY, MINIMAX_API_KEY, ANTHROPIC_API_KEY, or "
-                "WRITEFLOW_API_KEY."
+                "未找到模型 API Key。请设置 WRITEFLOW_PROVIDER 和对应密钥："
+                "DEEPSEEK_API_KEY、MINIMAX_API_KEY、ANTHROPIC_API_KEY，"
+                "或 WRITEFLOW_API_KEY。"
             )
         return self.settings.api_key
 
     def _chat_completions_url(self) -> str:
         if not self.settings.base_url:
             raise ModelClientError(
-                "Missing base URL. Set WRITEFLOW_BASE_URL for openai_compatible "
-                "providers, or use provider deepseek/minimax defaults."
+                "缺少 Base URL。openai_compatible provider 需要设置 "
+                "WRITEFLOW_BASE_URL；deepseek/minimax 会使用默认地址。"
             )
         if self.settings.base_url.endswith("/chat/completions"):
             return self.settings.base_url
@@ -143,27 +143,34 @@ class ModelClient:
                 return self._parse_openai_response(json.loads(body))
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")
-                last_error = ModelClientError(
-                    f"{self.provider} API HTTP {exc.code}: {detail[:1000]}"
-                )
+                last_error = ModelClientError(self._format_http_error(exc.code, detail))
                 if 400 <= exc.code < 500 and exc.code not in {408, 429}:
                     break
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-                last_error = exc
+                last_error = ModelClientError(
+                    f"{self.provider} API 请求失败: {exc}"
+                )
 
             if attempt < self.max_retries:
                 time.sleep(min(2**attempt, 8))
 
-        raise ModelClientError(str(last_error))
+        if isinstance(last_error, ModelClientError):
+            raise last_error
+        raise ModelClientError(f"{self.provider} API 请求失败。")
 
     def _parse_openai_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
         choices = response.get("choices") or []
         if choices:
             message = choices[0].get("message") or {}
-            content = message.get("content") or ""
+            content = self._normalize_content(message.get("content"))
         else:
             # Some compatible APIs may use a flatter response in error-free cases.
-            content = response.get("reply") or response.get("content") or ""
+            content = self._normalize_content(response.get("reply") or response.get("content"))
+
+        if not content.strip():
+            raise ModelClientError(
+                f"{self.provider} API 返回了空内容，请检查模型名、账号额度或接口响应格式。"
+            )
 
         usage = response.get("usage") or {}
         return {
@@ -179,6 +186,34 @@ class ModelClient:
             "model": response.get("model", self.model),
             "provider": self.provider,
         }
+
+    def _format_http_error(self, status_code: int, detail: str) -> str:
+        prefix = f"{self.provider} API HTTP {status_code}"
+        hint = {
+            401: "认证失败，请检查 API Key 是否正确。",
+            403: "请求被拒绝，请检查账号权限、模型权限或余额。",
+            408: "请求超时，可以稍后重试或调大 WRITEFLOW_TIMEOUT。",
+            429: "请求过于频繁或额度不足，请稍后重试。",
+        }.get(status_code, "接口请求失败。")
+        return f"{prefix}: {hint} 响应: {detail[:1000]}"
+
+    @staticmethod
+    def _normalize_content(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    text = item.get("text") or item.get("content")
+                    if isinstance(text, str):
+                        parts.append(text)
+            return "\n".join(parts)
+        return str(content)
 
     def _generate_anthropic(
         self,
@@ -213,8 +248,13 @@ class ModelClient:
 
         response = client.messages.create(**params)
         usage = response.usage
+        content = response.content[0].text if response.content else ""
+        if not content.strip():
+            raise ModelClientError(
+                "Anthropic API 返回了空内容，请检查模型名、账号额度或接口响应格式。"
+            )
         return {
-            "content": response.content[0].text,
+            "content": content,
             "usage": {
                 "input_tokens": usage.input_tokens,
                 "output_tokens": usage.output_tokens,

@@ -23,7 +23,8 @@ source .venv/bin/activate
 pip install -e .
 writeflow start
 python3 write.py "测试主题"
-python3 -m compileall -q write.py src
+python3 -m compileall -q write.py src tests
+python3 -m pytest -q
 ```
 
 On Windows PowerShell, use:

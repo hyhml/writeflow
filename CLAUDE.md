@@ -20,7 +20,8 @@ Python app needs `.env` or exported environment variables.
 ```bash
 git status
 python3 --version
-python3 -m compileall -q write.py src
+python3 -m compileall -q write.py src tests
+python3 -m pytest -q
 ```
 
 If dependencies are needed:

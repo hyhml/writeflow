@@ -39,3 +39,29 @@ python3 write.py "中考分流制度" -o
 **输出**：`outputs/中考分流制度_*.md` + `outputs/中考分流制度_*_scores.json`
 
 **结论**：v0.2.1 在 WSL 环境下使用 MiniMax API Key 完整运行通过，多 Agent 写作流程和质量 Gate 均正常工作。
+
+## v0.2.2 (2026-07-09)
+
+**环境**：Windows Codex workspace, Python 3.14.6
+
+**目标**：增加自动化测试、统一版本号、加强 CLI/API 错误提示，并加入 GitHub Actions CI。
+
+**验证命令**：
+
+```bash
+python -m compileall -q write.py src tests
+python -m pytest -q
+python write.py "测试主题"
+```
+
+**运行结果**：
+
+| 项目 | 状态 |
+|------|------|
+| 版本号 | 0.2.2 |
+| 编译检查 | ✅ 通过 |
+| pytest | ✅ 21 passed |
+| 无 API Key 场景 | ✅ 返回清晰配置提示 |
+| 真实 API 调用 | 未执行，本版本自动化测试全部 mock，不消耗额度 |
+
+**结论**：v0.2.2 已补齐基础测试与 CI 配置，并将导出路径、评分 JSON 保存、模型响应解析等稳定性逻辑纳入自动化验证。

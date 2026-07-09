@@ -232,6 +232,35 @@ def get_settings(refresh: bool = False) -> Settings:
     return _settings
 
 
+def validate_runtime_settings(settings: Optional[Settings] = None) -> list[str]:
+    """Return human-readable configuration issues without raising."""
+
+    current = settings or get_settings()
+    issues: list[str] = []
+
+    if current.provider not in SUPPORTED_PROVIDERS:
+        issues.append(
+            "WRITEFLOW_PROVIDER 必须是以下值之一: "
+            + ", ".join(sorted(SUPPORTED_PROVIDERS))
+        )
+
+    if not current.api_key:
+        issues.append(f"provider '{current.provider}' 缺少 API Key。")
+
+    if current.provider == "openai_compatible" and not current.base_url:
+        issues.append(
+            "WRITEFLOW_PROVIDER=openai_compatible 时必须设置 WRITEFLOW_BASE_URL。"
+        )
+
+    if current.max_retries < 0:
+        issues.append("WRITEFLOW_MAX_RETRIES 必须大于或等于 0。")
+
+    if current.request_timeout <= 0:
+        issues.append("WRITEFLOW_TIMEOUT 必须大于 0。")
+
+    return issues
+
+
 def reset_settings_cache() -> None:
     """Test helper for reloading environment changes."""
     global _settings, _dotenv_loaded

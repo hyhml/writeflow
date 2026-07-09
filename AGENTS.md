@@ -42,7 +42,8 @@ WRITEFLOW_BASE_URL=...
 Run at least:
 
 ```bash
-python3 -m compileall -q write.py src
+python3 -m compileall -q write.py src tests
+python3 -m pytest -q
 writeflow start
 ```
 

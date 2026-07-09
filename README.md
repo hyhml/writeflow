@@ -56,6 +56,26 @@ python3 write.py "技术进步与社会不平等"
 writeflow submit "技术进步与社会不平等"
 ```
 
+保存为 Markdown 文件：
+
+```bash
+python3 write.py "技术进步与社会不平等" -o
+```
+
+这会在 `outputs/` 下生成 `.md` 稿件和对应的 `_scores.json` 评分记录。
+
+## 开发与测试
+
+v0.2.2 开始，项目包含不依赖真实 API Key 的自动化测试。安装开发依赖后运行：
+
+```bash
+pip install -e ".[dev]"
+python -m compileall -q write.py src tests
+python -m pytest -q
+```
+
+这些测试通过 mock 验证配置、输出文件、Quality Gate 和 OpenAI-compatible API 解析逻辑，不会消耗 MiniMax、DeepSeek 或 Anthropic 额度。
+
 ## DeepSeek 配置
 
 在 `.env` 中填入：
@@ -132,13 +152,15 @@ git push
 - 7 维质量评分与 Quality Gate
 - `.env` 配置读取
 - DeepSeek / MiniMax / Anthropic / 通用 OpenAI-compatible 后端选择
+- `python3 write.py "主题" -o` 保存 `.md` 稿件和 `_scores.json` 评分记录
+- pytest 自动化测试与 GitHub Actions CI
 - WSL 下可安装、可导入、可通过 CLI 检查配置
 
 ## 当前限制
 
 - Researcher 目前是让模型整理素材，不是真正联网检索。
 - 尚未支持读取 PDF、Word、TXT 用户资料。
-- 尚未支持导出 `.docx` 或 `.pdf`，当前主要输出到终端。
+- 尚未支持导出 `.docx` 或 `.pdf`，当前可输出到终端或保存 `.md`。
 - 后台队列相关代码仍是预留能力，默认运行路径是本地同步执行。
 - 不要把真实 `.env` 或 API Key 提交到 GitHub。
 

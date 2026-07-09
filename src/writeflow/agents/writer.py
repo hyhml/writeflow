@@ -81,7 +81,6 @@ class WriterAgent(BaseAgent):
 
     async def _write(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """生成批判性文章"""
-        task_id = input_data["task_id"]
         topic = input_data.get("topic", "")
         materials = input_data.get("materials", [])
         previous_rounds = input_data.get("previous_rounds", [])
