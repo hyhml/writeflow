@@ -25,32 +25,28 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class QualityScores:
-    """7维质量评分"""
-    批判锋芒: float = 0.0
-    理论深度: float = 0.0
-    洞察力度: float = 0.0
-    论证严谨性: float = 0.0
-    社会关联度: float = 0.0
-    文字穿透力: float = 0.0
-    学术规范性: float = 0.0
+    """5项判浅评分"""
+    新判断: float = 0.0
+    概念克制: float = 0.0
+    句子必要性: float = 0.0
+    层次穿透: float = 0.0
+    方案具体性: float = 0.0
 
     def total(self) -> float:
         """总分"""
         return (
-            self.批判锋芒
-            + self.理论深度
-            + self.洞察力度
-            + self.论证严谨性
-            + self.社会关联度
-            + self.文字穿透力
-            + self.学术规范性
+            self.新判断
+            + self.概念克制
+            + self.句子必要性
+            + self.层次穿透
+            + self.方案具体性
         )
 
     def passed_dimensions(self, threshold: float = 8.0) -> List[str]:
         """获取达到阈值的维度"""
         return [k for k, v in self.__dict__.items() if v >= threshold]
 
-    def failed_dimensions(self, threshold: float = 4.0) -> List[str]:
+    def failed_dimensions(self, threshold: float = 6.0) -> List[str]:
         """获取未达标的维度"""
         return [k for k, v in self.__dict__.items() if v < threshold]
 
@@ -596,27 +592,10 @@ class WriteFlow:
 
         qs = gate_result.quality_scores
         if isinstance(qs, dict):
-            return QualityScores(
-                批判锋芒=qs.get("批判锋芒", 0),
-                理论深度=qs.get("理论深度", 0),
-                洞察力度=qs.get("洞察力度", 0),
-                论证严谨性=qs.get("论证严谨性", 0),
-                社会关联度=qs.get("社会关联度", 0),
-                文字穿透力=qs.get("文字穿透力", 0),
-                学术规范性=qs.get("学术规范性", 0),
-            )
+            return self._scores_from_dict(qs)
 
         if hasattr(qs, "scores"):
-            scores_dict = qs.scores
-            return QualityScores(
-                批判锋芒=scores_dict.get("批判锋芒", 0),
-                理论深度=scores_dict.get("理论深度", 0),
-                洞察力度=scores_dict.get("洞察力度", 0),
-                论证严谨性=scores_dict.get("论证严谨性", 0),
-                社会关联度=scores_dict.get("社会关联度", 0),
-                文字穿透力=scores_dict.get("文字穿透力", 0),
-                学术规范性=scores_dict.get("学术规范性", 0),
-            )
+            return self._scores_from_dict(qs.scores)
 
         return QualityScores()
 
@@ -626,12 +605,21 @@ class WriteFlow:
         if not scores_dict:
             return QualityScores()
 
+        return self._scores_from_dict(scores_dict)
+
+    def _scores_from_dict(self, scores_dict: Dict[str, Any]) -> QualityScores:
+        """Map raw judge scores to the five depth-check dimensions."""
         return QualityScores(
-            批判锋芒=scores_dict.get("批判锋芒", 0),
-            理论深度=scores_dict.get("理论深度", 0),
-            洞察力度=scores_dict.get("洞察力度", 0),
-            论证严谨性=scores_dict.get("论证严谨性", 0),
-            社会关联度=scores_dict.get("社会关联度", 0),
-            文字穿透力=scores_dict.get("文字穿透力", 0),
-            学术规范性=scores_dict.get("学术规范性", 0),
+            新判断=self._coerce_score(scores_dict.get("新判断", 0)),
+            概念克制=self._coerce_score(scores_dict.get("概念克制", 0)),
+            句子必要性=self._coerce_score(scores_dict.get("句子必要性", 0)),
+            层次穿透=self._coerce_score(scores_dict.get("层次穿透", 0)),
+            方案具体性=self._coerce_score(scores_dict.get("方案具体性", 0)),
         )
+
+    @staticmethod
+    def _coerce_score(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0

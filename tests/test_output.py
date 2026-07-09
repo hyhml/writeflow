@@ -30,7 +30,7 @@ class DummyResult:
     content: str = "正文"
     scores: DummyScores = field(default_factory=DummyScores)
     passed: bool = True
-    pass_reason: str = "excellent_dimensions"
+    pass_reason: str = "depth_passed"
     rounds: int = 1
     task_id: str = "task-1"
     trace_events: list = field(default_factory=list)

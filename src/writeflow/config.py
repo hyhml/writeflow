@@ -52,11 +52,7 @@ class Settings:
     max_retries: int
     max_rounds: int
     min_rounds: int
-    quality_threshold_excellent: float
-    quality_threshold_pass: float
-    quality_threshold_reject: float
-    quality_total_threshold: float
-    quality_developed_protection: float
+    quality_depth_threshold: float
 
     @property
     def claude_model(self) -> str:
@@ -221,13 +217,7 @@ def get_settings(refresh: bool = False) -> Settings:
         max_retries=_env_int("WRITEFLOW_MAX_RETRIES", 3),
         max_rounds=_env_int("MAX_ROUND", _env_int("WRITEFLOW_MAX_ROUNDS", 5)),
         min_rounds=_env_int("MIN_ROUND", _env_int("WRITEFLOW_MIN_ROUNDS", 2)),
-        quality_threshold_excellent=_env_float("QUALITY_THRESHOLD_EXCELLENT", 8.0),
-        quality_threshold_pass=_env_float("QUALITY_THRESHOLD_PASS", 4.5),
-        quality_threshold_reject=_env_float("QUALITY_THRESHOLD_REJECT", 4.0),
-        quality_total_threshold=_env_float("QUALITY_TOTAL_THRESHOLD", 56.0),
-        quality_developed_protection=_env_float(
-            "QUALITY_DEVELOPED_PROTECTION", 6.0
-        ),
+        quality_depth_threshold=_env_float("QUALITY_DEPTH_THRESHOLD", 6.0),
     )
     return _settings
 

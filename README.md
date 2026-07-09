@@ -1,6 +1,6 @@
 # WriteFLow
 
-WriteFLow 是一个本地运行的多 Agent 深度稿件生成工具。它把一个写作主题交给多个 Agent 协作处理：素材整理、核心判断、初稿写作、反方质疑、质量评分、最终编辑。
+WriteFLow 是一个本地运行的多 Agent 深度稿件生成工具。它把一个写作主题交给多个 Agent 协作处理：素材整理、核心判断、初稿写作、反方质疑、判浅审稿、最终编辑。
 
 当前版本支持以下模型后端：
 
@@ -62,7 +62,7 @@ writeflow submit "技术进步与社会不平等"
 python3 write.py "技术进步与社会不平等" -o
 ```
 
-这会在 `outputs/` 下生成 `.md` 稿件和对应的 `_scores.json` 评分记录。
+这会在 `outputs/` 下生成 `.md` 稿件和对应的 `_scores.json` 判浅记录。
 
 从 v0.2.3 开始，使用 `-o` 保存时还会生成同名 `_trace/` 文件夹，用来查看每个 Agent 的工作过程：
 
@@ -72,11 +72,13 @@ outputs/主题_时间_scores.json
 outputs/主题_时间_trace/
 ```
 
-`_trace/` 中会包含 Researcher 素材、Thesis Architect 核心判断、Writer 初稿、Devil Advocate 质疑、Writer 辩护、Judge 评分、Editor 原始输出和清洗后的最终稿。
+`_trace/` 中会包含 Researcher 素材、Thesis Architect 核心判断、Writer 初稿、Devil Advocate 质疑、Writer 辩护、Judge 判浅结果、Editor 原始输出和清洗后的最终稿。
 
 从 v0.2.4 开始，Researcher 和 Writer 之间新增 Thesis Architect。它不会写正文，只输出一份核心判断简报，回答：文章最想证明的一句话是什么、它和普通观点有什么冲突、如果成立会推翻什么常识、最强证据是什么、最危险的反驳是什么。使用 `-o` 时，这份简报会保存到 `_trace/02_thesis_architect_brief.json`。
 
 从 v0.2.5 开始，Writer 会采用“主轴推进”写法：少写几个层面，但每个主要层面都要回答机制是什么、谁获益、谁承担代价、常见解释为什么错，以及能否被具体例子证明。
+
+从 v0.2.6 开始，Judge 不再使用旧的 7 维术语化评分，而是改为 5 项判浅标准：新判断、概念克制、句子必要性、层次穿透、方案具体性。任一项低于 6 分都会被判为浅。
 
 ## 开发与测试
 
@@ -164,10 +166,10 @@ git push
 - 6 个 Agent：Researcher、Thesis Architect、Writer、Devil Advocate、Judge、Editor
 - Writer 围绕 `core_claim` 主轴推进，避免主题综述式浅层覆盖
 - 多轮写作与质疑流程
-- 7 维质量评分与 Quality Gate
+- 5 项判浅标准与 Quality Gate
 - `.env` 配置读取
 - DeepSeek / MiniMax / Anthropic / 通用 OpenAI-compatible 后端选择
-- `python3 write.py "主题" -o` 保存 `.md` 稿件和 `_scores.json` 评分记录
+- `python3 write.py "主题" -o` 保存 `.md` 稿件和 `_scores.json` 判浅记录
 - Agent 工作过程 `_trace/` 导出，便于查看每一步如何生成
 - 自动清理最终稿中的 `<think>`、模型自检说明和编辑过程文本
 - pytest 自动化测试与 GitHub Actions CI

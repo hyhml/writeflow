@@ -136,25 +136,11 @@ class RoundController:
         return False, ""
 
     def _check_quality_passed(self, scores: Dict[str, float]) -> bool:
-        """检查质量是否已通过"""
+        """检查判浅评分是否已通过"""
         if not scores:
             return False
 
-        settings = get_settings()
-        excellent_count = sum(
-            1 for s in scores.values() if s >= settings.quality_threshold_excellent
-        )
-        if excellent_count >= 2:
-            return True
-
-        total = sum(scores.values())
-        if total >= settings.quality_total_threshold:
-            return True
-
-        if all(s >= settings.quality_developed_protection for s in scores.values()):
-            return True
-
-        return False
+        return all(score >= 6 for score in scores.values())
 
     def _check_stalemate(self) -> bool:
         """检查是否陷入僵局"""
@@ -234,29 +220,7 @@ class TerminationChecker:
         if not quality_scores:
             return False, "no_scores"
 
-        # 基础门槛
-        if any(s < self.settings.quality_threshold_pass for s in quality_scores.values()):
-            return False, "below_minimum"
+        if any(score < 6 for score in quality_scores.values()):
+            return False, "shallow_dimensions"
 
-        # 优秀门槛
-        excellent_count = sum(
-            1
-            for s in quality_scores.values()
-            if s >= self.settings.quality_threshold_excellent
-        )
-        if excellent_count >= 2:
-            return True, "excellent_dimensions"
-
-        # 总分门槛
-        total = sum(quality_scores.values())
-        if total >= self.settings.quality_total_threshold:
-            return True, "total_score"
-
-        # 全面发展保护
-        if all(
-            s >= self.settings.quality_developed_protection
-            for s in quality_scores.values()
-        ):
-            return True, "all_developed"
-
-        return False, "not_meets_threshold"
+        return True, "depth_passed"

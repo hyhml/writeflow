@@ -23,11 +23,7 @@ def make_settings(**overrides) -> Settings:
         "max_retries": 0,
         "max_rounds": 2,
         "min_rounds": 1,
-        "quality_threshold_excellent": 8.0,
-        "quality_threshold_pass": 4.5,
-        "quality_threshold_reject": 4.0,
-        "quality_total_threshold": 56.0,
-        "quality_developed_protection": 6.0,
+        "quality_depth_threshold": 6.0,
     }
     values.update(overrides)
     return Settings(**values)

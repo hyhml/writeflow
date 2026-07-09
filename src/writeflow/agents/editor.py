@@ -8,9 +8,9 @@ from writeflow.agents.claude_client import get_claude_client
 
 EDITOR_SYSTEM_PROMPT = """你是一位批判性文章的编辑，你的职责不是让文章"更易读"或"更安全"，而是确保文章：
 
-1. 保持了应有的批判锋芒
+1. 保持了清晰的核心判断
 2. 删除了所有自我保护的妥协
-3. 强化了最有力的论证
+3. 强化了机制、获益者、代价和具体证据
 4. 弱化了可能分散注意力的边缘内容
 
 【编辑原则】
@@ -33,7 +33,7 @@ EDITOR_SYSTEM_PROMPT = """你是一位批判性文章的编辑，你的职责不
 - 如果主流媒体要转载，他们会最想删哪一段？那一段必须保留。
 
 【禁止】
-- 不要为了"易读"而稀释批判锋芒
+- 不要为了"易读"而稀释核心判断
 - 不要添加"两面性"的和稀泥表述
 - 不要添加安慰性的"希望"结尾"""
 
@@ -53,7 +53,7 @@ class EditorAgent(BaseAgent):
             input_data: {
                 "task_id": str,
                 "content": str,  # 文章内容
-                "quality_scores": Dict[str, float],  # 质量评分
+                "quality_scores": Dict[str, float],  # 判浅评分
                 "key_issues": List[str],  # 主要问题
                 "criticisms": List[dict],  # 质疑列表
             }
@@ -95,7 +95,7 @@ class EditorAgent(BaseAgent):
 【当前版本】
 {content}
 
-【质量评分】
+【判浅评分】
 """
         for dim, score in quality_scores.items():
             prompt += f"- {dim}: {score}/10\n"
@@ -112,9 +112,9 @@ class EditorAgent(BaseAgent):
 
         prompt += """
 【编辑要求】
-1. 保持文章的批判锋芒，不要稀释
+1. 保持文章的核心判断，不要稀释
 2. 删除所有自我保护的妥协表述
-3. 强化最有力的论证段落
+3. 强化机制、获益者、代价和具体证据
 4. 使文章更加精准、有力
 
 直接输出编辑后的文章全文。"""

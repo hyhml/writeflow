@@ -154,3 +154,26 @@ python -m ruff check .
 | ruff | ✅ All checks passed |
 
 **结论**：v0.2.5 保持既有 Agent 流程和 trace 输出不变，只强化 Writer 的初稿任务：不再写主题综述，而是围绕 `core_claim` 做少层面、深机制的推进式论证。
+
+## v0.2.6 (2026-07-09)
+
+**环境**：Windows Codex workspace, Python 3.14.6
+
+**目标**：替换原有 7 维术语化 Judge 标准，改为 5 项判浅标准：新判断、概念克制、句子必要性、层次穿透、方案具体性。
+
+**验证命令**：
+```bash
+python -m compileall -q write.py src tests
+python -m pytest -q
+python -m ruff check .
+```
+
+**运行结果**：
+| 项目 | 状态 |
+|------|------|
+| 版本号 | 0.2.6 |
+| 编译检查 | ✅ 通过 |
+| pytest | ✅ 37 passed |
+| ruff | ✅ All checks passed |
+
+**结论**：v0.2.6 不新增 Agent，直接替换原 Judge 和 Quality Gate。任一判浅维度低于 6 分都会失败，不再因为总分高、术语多或个别维度高分而放行。

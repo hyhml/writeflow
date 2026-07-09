@@ -10,38 +10,36 @@ def scores(values: list[float]) -> dict[str, float]:
     return dict(zip(DIMS, values))
 
 
-def test_rejects_any_failed_dimension():
-    result = QualityGate().evaluate(scores([3.5, 8, 8, 8, 8, 8, 8]))
+def test_depth_gate_uses_five_shallow_check_dimensions():
+    assert DIMS == ["新判断", "概念克制", "句子必要性", "层次穿透", "方案具体性"]
+
+
+def test_rejects_any_dimension_below_six():
+    result = QualityGate().evaluate(scores([6, 6, 5.9, 10, 10]))
 
     assert result.passed is False
-    assert result.reason == "failed_dimensions"
-    assert DIMS[0] in result.failed_dimensions
+    assert result.reason == "shallow_dimensions"
+    assert "句子必要性" in result.failed_dimensions
 
 
-def test_passes_when_two_dimensions_are_excellent():
-    result = QualityGate().evaluate(scores([8, 8, 5, 5, 5, 5, 5]))
-
-    assert result.passed is True
-    assert result.reason == "excellent_dimensions"
-
-
-def test_passes_by_total_score_even_with_one_excellent_dimension():
-    result = QualityGate().evaluate(scores([9, 7.9, 7.9, 7.9, 7.9, 7.9, 7.9]))
+def test_passes_only_when_all_dimensions_reach_six():
+    result = QualityGate().evaluate(scores([6, 6, 6, 6, 6]))
 
     assert result.passed is True
-    assert result.reason == "total_score"
+    assert result.reason == "depth_passed"
 
 
-def test_passes_when_all_dimensions_are_developed():
-    result = QualityGate().evaluate(scores([6, 6, 6, 6, 6, 6, 6]))
-
-    assert result.passed is True
-    assert result.reason == "all_developed"
-
-
-def test_returns_recommendations_when_not_meeting_threshold():
-    result = QualityGate().evaluate(scores([5, 5, 5, 5, 5, 5, 5]))
+def test_high_total_score_no_longer_overrides_shallow_dimension():
+    result = QualityGate().evaluate(scores([10, 10, 10, 10, 5]))
 
     assert result.passed is False
-    assert result.reason == "not_meets_threshold"
+    assert result.reason == "shallow_dimensions"
+    assert "方案具体性" in result.failed_dimensions
+
+
+def test_excellent_dimensions_no_longer_override_shallow_dimension():
+    result = QualityGate().evaluate(scores([9, 9, 5, 5, 5]))
+
+    assert result.passed is False
+    assert result.reason == "shallow_dimensions"
     assert result.recommendations

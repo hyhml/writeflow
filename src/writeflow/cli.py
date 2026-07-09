@@ -122,7 +122,7 @@ async def cmd_submit(args: list[str]) -> int:
 
     if result["status"] == "completed":
         print("\n任务完成!")
-        print(f"质量评分: {result['quality_scores']}")
+        print(f"判浅评分: {result['quality_scores']}")
         print(f"Gate 结果: {result['gate_result']['passed']}")
         print(f"\n最终内容 ({len(result['final_content'])} 字符):")
         print("-" * 60)
