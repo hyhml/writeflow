@@ -136,7 +136,11 @@ class DevilAdvocateAgent(BaseAgent):
         if previous_criticisms:
             prompt += "\n\n【避免重复】\n以下质疑已在之前的轮次提出，请不要重复：\n"
             for pc in previous_criticisms[-5:]:
-                prompt += f"- {pc.get('question', pc.get('content', ''))[:50]}...\n"
+                if isinstance(pc, dict):
+                    text = pc.get('question', pc.get('content', ''))
+                else:
+                    text = getattr(pc, 'question', '') or getattr(pc, 'content', '')
+                prompt += f"- {text[:50]}...\n"
 
         return prompt
 
