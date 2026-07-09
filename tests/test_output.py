@@ -113,6 +113,20 @@ def test_save_trace_writes_agent_files(tmp_path):
             "created_at": "2026-07-09T10:00:00Z",
         },
         {
+            "stage": "thesis_architect_brief",
+            "agent": "thesis_architect",
+            "round": None,
+            "input_summary": {},
+            "output": {
+                "core_claim": "core claim",
+                "conflict_with_common_view": "conflict",
+                "common_sense_overturned": "overturned",
+                "strongest_evidence": "evidence",
+                "most_dangerous_counterargument": "counterargument",
+            },
+            "created_at": "2026-07-09T10:00:30Z",
+        },
+        {
             "stage": "writer_draft",
             "agent": "writer",
             "round": 1,
@@ -159,6 +173,7 @@ def test_save_trace_writes_agent_files(tmp_path):
     assert (trace_dir / "00_manifest.json").exists()
     assert (trace_dir / "00_timeline.md").exists()
     assert (trace_dir / "01_researcher_materials.json").exists()
+    assert (trace_dir / "02_thesis_architect_brief.json").exists()
     assert (trace_dir / "round_01_writer_draft.md").exists()
     assert (trace_dir / "round_01_devil_advocate_criticisms.json").exists()
     assert (trace_dir / "round_01_writer_defense.md").exists()

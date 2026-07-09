@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from writeflow.agents.researcher import ResearcherAgent
+from writeflow.agents.thesis_architect import ThesisArchitectAgent
 from writeflow.agents.writer import WriterAgent
 from writeflow.agents.devil_advocate import DevilAdvocateAgent
 from writeflow.agents.judge import JudgeAgent
@@ -165,6 +166,7 @@ class WriteFlow:
         # 初始化Agent
         self.agents = {
             "researcher": ResearcherAgent(api_key=api_key),
+            "thesis_architect": ThesisArchitectAgent(api_key=api_key),
             "writer": WriterAgent(api_key=api_key),
             "devil_advocate": DevilAdvocateAgent(api_key=api_key),
             "judge": JudgeAgent(api_key=api_key),
@@ -210,6 +212,18 @@ class WriteFlow:
             output={"materials": materials},
         )
 
+        thesis = await self._build_thesis(task_id, topic, materials)
+        self._record_trace(
+            trace_events,
+            stage="thesis_architect_brief",
+            agent="thesis_architect",
+            input_summary={
+                "topic": topic,
+                "materials_count": len(materials),
+            },
+            output=thesis,
+        )
+
         # Phase 2-N: 讨论循环
         debate_graph = DebateGraph()
         content = ""
@@ -221,7 +235,7 @@ class WriteFlow:
 
             # 2a: Writer生成
             content = await self._write_content(
-                task_id, topic, materials, round_num, content
+                task_id, topic, materials, thesis, round_num, content
             )
             self._record_trace(
                 trace_events,
@@ -231,6 +245,7 @@ class WriteFlow:
                 input_summary={
                     "topic": topic,
                     "materials_count": len(materials),
+                    "core_claim": thesis.get("core_claim", ""),
                 },
                 output={"content": content},
             )
@@ -384,11 +399,42 @@ class WriteFlow:
         })
         return result.get("materials", [])
 
+    async def _build_thesis(
+        self,
+        task_id: str,
+        topic: str,
+        materials: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Build the core thesis brief before drafting."""
+        result = await self.agents["thesis_architect"].process({
+            "task_id": task_id,
+            "topic": topic,
+            "materials": materials,
+        })
+        known_fields = {
+            "core_claim",
+            "conflict_with_common_view",
+            "common_sense_overturned",
+            "strongest_evidence",
+            "most_dangerous_counterargument",
+        }
+        return {
+            "core_claim": result.get("core_claim", ""),
+            "conflict_with_common_view": result.get("conflict_with_common_view", ""),
+            "common_sense_overturned": result.get("common_sense_overturned", ""),
+            "strongest_evidence": result.get("strongest_evidence", ""),
+            "most_dangerous_counterargument": result.get(
+                "most_dangerous_counterargument", ""
+            ),
+            **{key: value for key, value in result.items() if key not in known_fields},
+        }
+
     async def _write_content(
         self,
         task_id: str,
         topic: str,
         materials: List[Dict],
+        thesis: Dict[str, Any],
         round_num: int,
         previous_content: str,
     ) -> str:
@@ -399,6 +445,7 @@ class WriteFlow:
             "mode": "write",
             "topic": topic,
             "materials": materials,
+            "thesis": thesis,
             "previous_rounds": [],
         })
         return result.get("content", "")

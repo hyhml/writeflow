@@ -1,6 +1,6 @@
 # WriteFLow
 
-WriteFLow 是一个本地运行的多 Agent 深度稿件生成工具。它把一个写作主题交给多个 Agent 协作处理：素材整理、初稿写作、反方质疑、质量评分、最终编辑。
+WriteFLow 是一个本地运行的多 Agent 深度稿件生成工具。它把一个写作主题交给多个 Agent 协作处理：素材整理、核心判断、初稿写作、反方质疑、质量评分、最终编辑。
 
 当前版本支持以下模型后端：
 
@@ -72,7 +72,9 @@ outputs/主题_时间_scores.json
 outputs/主题_时间_trace/
 ```
 
-`_trace/` 中会包含 Researcher 素材、Writer 初稿、Devil Advocate 质疑、Writer 辩护、Judge 评分、Editor 原始输出和清洗后的最终稿。
+`_trace/` 中会包含 Researcher 素材、Thesis Architect 核心判断、Writer 初稿、Devil Advocate 质疑、Writer 辩护、Judge 评分、Editor 原始输出和清洗后的最终稿。
+
+从 v0.2.4 开始，Researcher 和 Writer 之间新增 Thesis Architect。它不会写正文，只输出一份核心判断简报，回答：文章最想证明的一句话是什么、它和普通观点有什么冲突、如果成立会推翻什么常识、最强证据是什么、最危险的反驳是什么。使用 `-o` 时，这份简报会保存到 `_trace/02_thesis_architect_brief.json`。
 
 ## 开发与测试
 
@@ -157,7 +159,7 @@ git push
 
 ## 当前功能
 
-- 5 个 Agent：Researcher、Writer、Devil Advocate、Judge、Editor
+- 6 个 Agent：Researcher、Thesis Architect、Writer、Devil Advocate、Judge、Editor
 - 多轮写作与质疑流程
 - 7 维质量评分与 Quality Gate
 - `.env` 配置读取

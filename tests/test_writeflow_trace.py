@@ -16,11 +16,28 @@ class MockResearcher:
         return {"materials": [{"content": "素材", "source": "mock"}]}
 
 
-class MockWriter:
+class MockThesisArchitect:
     def __init__(self, *args, **kwargs):
         pass
 
     async def process(self, input_data):
+        return {
+            "core_claim": "core claim",
+            "conflict_with_common_view": "conflict",
+            "common_sense_overturned": "overturned common sense",
+            "strongest_evidence": "strongest evidence",
+            "most_dangerous_counterargument": "dangerous counterargument",
+        }
+
+
+class MockWriter:
+    inputs = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def process(self, input_data):
+        MockWriter.inputs.append(input_data)
         if input_data.get("mode") == "defense":
             return {"content": "这是辩护内容"}
         return {"content": "# 初稿标题\n\n这是初稿。"}
@@ -77,7 +94,9 @@ def clean_settings(monkeypatch):
 
 
 def test_writeflow_records_agent_trace_and_cleans_final_article(monkeypatch):
+    MockWriter.inputs = []
     monkeypatch.setattr(wf_module, "ResearcherAgent", MockResearcher)
+    monkeypatch.setattr(wf_module, "ThesisArchitectAgent", MockThesisArchitect)
     monkeypatch.setattr(wf_module, "WriterAgent", MockWriter)
     monkeypatch.setattr(wf_module, "DevilAdvocateAgent", MockDevilAdvocate)
     monkeypatch.setattr(wf_module, "JudgeAgent", MockJudge)
@@ -90,6 +109,7 @@ def test_writeflow_records_agent_trace_and_cleans_final_article(monkeypatch):
 
     assert stages == [
         "researcher_materials",
+        "thesis_architect_brief",
         "writer_draft",
         "devil_advocate_criticisms",
         "writer_defense",
@@ -98,6 +118,7 @@ def test_writeflow_records_agent_trace_and_cleans_final_article(monkeypatch):
         "final_article",
     ]
     assert "researcher" in agents
+    assert "thesis_architect" in agents
     assert "writer" in agents
     assert "devil_advocate" in agents
     assert "judge" in agents
@@ -106,6 +127,7 @@ def test_writeflow_records_agent_trace_and_cleans_final_article(monkeypatch):
     assert "<think>" not in result.content
     assert "用户要求我" not in result.content
     assert "检测结果" not in result.content
+    assert MockWriter.inputs[0]["thesis"]["core_claim"] == "core claim"
 
 
 async def async_write_once():

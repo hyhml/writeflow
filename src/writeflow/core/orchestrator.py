@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 
 from writeflow.agents.researcher import ResearcherAgent
+from writeflow.agents.thesis_architect import ThesisArchitectAgent
 from writeflow.agents.writer import WriterAgent
 from writeflow.agents.devil_advocate import DevilAdvocateAgent
 from writeflow.agents.judge import JudgeAgent
@@ -35,6 +36,7 @@ class TaskContext:
 
         # 素材
         self.materials: List[dict] = []
+        self.thesis: Dict[str, Any] = {}
 
         # 讨论
         self.debate_graph = DebateGraph()
@@ -56,6 +58,7 @@ class TaskContext:
             "status": self.status,
             "current_round": self.current_round,
             "materials_count": len(self.materials),
+            "thesis_core_claim": self.thesis.get("core_claim", ""),
             "criticisms_total": self.debate_graph.total_criticisms,
             "criticisms_active": self.debate_graph.active_count,
             "quality_scores": self.quality_scores,
@@ -89,6 +92,7 @@ class Orchestrator:
         # Agent实例
         self.agents = {
             "researcher": ResearcherAgent(),
+            "thesis_architect": ThesisArchitectAgent(),
             "writer": WriterAgent(),
             "devil_advocate": DevilAdvocateAgent(),
             "judge": JudgeAgent(),
@@ -130,6 +134,8 @@ class Orchestrator:
             # Phase 1: 素材收集
             logger.info(f"Task {task_id}: Phase 1 - Research")
             await self._phase_research(task)
+            logger.info(f"Task {task_id}: Phase 1b - Thesis Architect")
+            await self._phase_thesis(task)
 
             # Phase 2-4: 讨论循环
             for round_num in range(1, self.max_rounds + 1):
@@ -192,6 +198,22 @@ class Orchestrator:
         task.materials = result.get("materials", [])
         return task.materials
 
+    async def _phase_thesis(self, task: TaskContext) -> Dict[str, Any]:
+        """Build the core thesis brief before drafting."""
+        result = await self.agents["thesis_architect"].process({
+            "task_id": task.task_id,
+            "topic": task.topic,
+            "materials": task.materials,
+        })
+        task.thesis = result
+        task.discussion_history.append({
+            "round": 0,
+            "phase": "thesis_architect",
+            "thesis": result,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        return task.thesis
+
     async def _phase_write(self, task: TaskContext) -> str:
         """写作阶段"""
         previous_rounds = []
@@ -205,6 +227,7 @@ class Orchestrator:
             "mode": "write",
             "topic": task.topic,
             "materials": task.materials,
+            "thesis": task.thesis,
             "previous_rounds": previous_rounds,
         })
 
@@ -382,6 +405,7 @@ class Orchestrator:
             "topic": task.topic,
             "status": task.status,
             "rounds_completed": task.current_round,
+            "thesis": task.thesis,
             "quality_scores": task.quality_scores,
             "gate_result": {
                 "passed": task.gate_result.passed if task.gate_result else False,

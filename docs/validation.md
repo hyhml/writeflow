@@ -98,3 +98,36 @@ outputs/<主题>_<时间>_trace/
 ```
 
 **结论**：v0.2.3 让最终稿和 Agent 过程分离，最终 `.md` 默认保存清洗后的正文，原始 Editor 输出保存在 `_trace/final_editor_raw.md` 便于排查。
+
+## v0.2.4 (2026-07-09)
+
+**环境**：Windows Codex workspace, Python 3.14.6
+
+**目标**：新增 Thesis Architect，在 Researcher 和 Writer 之间先产出核心判断简报，减少正文泛泛覆盖主题、浅尝辄止的问题。
+
+**验证命令**：
+```bash
+python -m compileall -q write.py src tests
+python -m pytest -q
+python -m ruff check .
+```
+
+**运行结果**：
+| 项目 | 状态 |
+|------|------|
+| 版本号 | 0.2.4 |
+| 编译检查 | ✅ 通过 |
+| pytest | ✅ 28 passed |
+| ruff | ✅ All checks passed |
+
+**新增流程**：
+```text
+Researcher -> Thesis Architect -> Writer -> Devil Advocate -> Judge -> Editor
+```
+
+**新增 trace 文件**：
+```text
+outputs/<主题>_<时间>_trace/02_thesis_architect_brief.json
+```
+
+**结论**：v0.2.4 已把“先立论再写作”接入主流程，Writer 会围绕 Thesis Architect 产出的 `core_claim` 写正文，trace 中也能查看这一步的完整结构化输出。

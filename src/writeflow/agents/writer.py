@@ -83,15 +83,19 @@ class WriterAgent(BaseAgent):
         """生成批判性文章"""
         topic = input_data.get("topic", "")
         materials = input_data.get("materials", [])
+        thesis = input_data.get("thesis", {})
         previous_rounds = input_data.get("previous_rounds", [])
 
         # 构建素材上下文
         materials_context = self._build_materials_context(materials)
+        thesis_context = self._build_thesis_context(thesis)
 
         # 构建写作提示
         writing_prompt = f"""请围绕以下主题撰写一篇批判性分析文章：
 
 主题：{topic}
+
+{thesis_context}
 
 {materials_context}
 
@@ -100,6 +104,8 @@ class WriterAgent(BaseAgent):
 2. 挑战至少一个主流假设
 3. 提供有证据支撑但允许反驳的论证
 4. 保持文章的锋利度和思想张力
+5. 全文必须围绕 Thesis Architect 的 core_claim 展开，每个小节都服务于证明这个核心判断
+6. 不要为了覆盖主题而罗列各个层面，优先写深一个矛盾和一条论证链
 
 直接输出文章全文，不要包含任何解释或元数据。"""
 
@@ -158,6 +164,18 @@ class WriterAgent(BaseAgent):
             "usage": response["usage"],
             "model": self.model,
         }
+
+    def _build_thesis_context(self, thesis: dict) -> str:
+        """Build the Thesis Architect context for drafting."""
+        if not thesis:
+            return "【核心判断简报】\n（无核心判断简报，请自行提出一个可争辩的核心判断。）"
+
+        return f"""【核心判断简报】
+- 核心判断：{thesis.get("core_claim", "")}
+- 与普通观点的冲突：{thesis.get("conflict_with_common_view", "")}
+- 将推翻的常识：{thesis.get("common_sense_overturned", "")}
+- 最强证据：{thesis.get("strongest_evidence", "")}
+- 最危险的反驳：{thesis.get("most_dangerous_counterargument", "")}"""
 
     def _build_materials_context(self, materials: list) -> str:
         """构建素材上下文"""
