@@ -76,6 +76,8 @@ outputs/主题_时间_trace/
 
 从 v0.2.4 开始，Researcher 和 Writer 之间新增 Thesis Architect。它不会写正文，只输出一份核心判断简报，回答：文章最想证明的一句话是什么、它和普通观点有什么冲突、如果成立会推翻什么常识、最强证据是什么、最危险的反驳是什么。使用 `-o` 时，这份简报会保存到 `_trace/02_thesis_architect_brief.json`。
 
+从 v0.2.5 开始，Writer 会采用“主轴推进”写法：少写几个层面，但每个主要层面都要回答机制是什么、谁获益、谁承担代价、常见解释为什么错，以及能否被具体例子证明。
+
 ## 开发与测试
 
 v0.2.2 开始，项目包含不依赖真实 API Key 的自动化测试。安装开发依赖后运行：
@@ -160,6 +162,7 @@ git push
 ## 当前功能
 
 - 6 个 Agent：Researcher、Thesis Architect、Writer、Devil Advocate、Judge、Editor
+- Writer 围绕 `core_claim` 主轴推进，避免主题综述式浅层覆盖
 - 多轮写作与质疑流程
 - 7 维质量评分与 Quality Gate
 - `.env` 配置读取

@@ -131,3 +131,26 @@ outputs/<主题>_<时间>_trace/02_thesis_architect_brief.json
 ```
 
 **结论**：v0.2.4 已把“先立论再写作”接入主流程，Writer 会围绕 Thesis Architect 产出的 `core_claim` 写正文，trace 中也能查看这一步的完整结构化输出。
+
+## v0.2.5 (2026-07-09)
+
+**环境**：Windows Codex workspace, Python 3.14.6
+
+**目标**：把 Writer 从“完整覆盖主题”的写法改成“围绕一个主轴推进”，要求每个主要层面回答机制、获益者、代价承担者、常见解释的问题和具体例子。
+
+**验证命令**：
+```bash
+python -m compileall -q write.py src tests
+python -m pytest -q
+python -m ruff check .
+```
+
+**运行结果**：
+| 项目 | 状态 |
+|------|------|
+| 版本号 | 0.2.5 |
+| 编译检查 | ✅ 通过 |
+| pytest | ✅ 31 passed |
+| ruff | ✅ All checks passed |
+
+**结论**：v0.2.5 保持既有 Agent 流程和 trace 输出不变，只强化 Writer 的初稿任务：不再写主题综述，而是围绕 `core_claim` 做少层面、深机制的推进式论证。

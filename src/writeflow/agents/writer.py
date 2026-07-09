@@ -86,35 +86,12 @@ class WriterAgent(BaseAgent):
         thesis = input_data.get("thesis", {})
         previous_rounds = input_data.get("previous_rounds", [])
 
-        # 构建素材上下文
-        materials_context = self._build_materials_context(materials)
-        thesis_context = self._build_thesis_context(thesis)
-
-        # 构建写作提示
-        writing_prompt = f"""请围绕以下主题撰写一篇批判性分析文章：
-
-主题：{topic}
-
-{thesis_context}
-
-{materials_context}
-
-【写作要求】
-1. 揭示被掩盖的深层结构
-2. 挑战至少一个主流假设
-3. 提供有证据支撑但允许反驳的论证
-4. 保持文章的锋利度和思想张力
-5. 全文必须围绕 Thesis Architect 的 core_claim 展开，每个小节都服务于证明这个核心判断
-6. 不要为了覆盖主题而罗列各个层面，优先写深一个矛盾和一条论证链
-
-直接输出文章全文，不要包含任何解释或元数据。"""
-
-        # 加入前几轮的反馈
-        if previous_rounds:
-            writing_prompt += "\n\n=== 前几轮迭代参考 ===\n"
-            for prev in previous_rounds[-2:]:
-                if prev.get("writer_output"):
-                    writing_prompt += f"\n轮次{prev['round']}产出：\n{prev['writer_output'][:500]}...\n"
+        writing_prompt = self._build_writing_prompt(
+            topic=topic,
+            thesis=thesis,
+            materials=materials,
+            previous_rounds=previous_rounds,
+        )
 
         messages = [{"role": "user", "content": writing_prompt}]
 
@@ -130,6 +107,57 @@ class WriterAgent(BaseAgent):
             "usage": response["usage"],
             "model": self.model,
         }
+
+    def _build_writing_prompt(
+        self,
+        *,
+        topic: str,
+        thesis: dict,
+        materials: list,
+        previous_rounds: list,
+    ) -> str:
+        """Build the drafting prompt around one central argument."""
+        materials_context = self._build_materials_context(materials)
+        thesis_context = self._build_thesis_context(thesis)
+
+        writing_prompt = f"""请围绕以下主题撰写一篇批判性分析文章：
+
+主题：{topic}
+
+{thesis_context}
+
+{materials_context}
+
+【主轴推进任务】
+你的任务不是写一篇主题综述，也不是完整覆盖这个题目的所有层面。
+你的任务是围绕 Thesis Architect 的 core_claim 沿一个主轴推进：少写几个层面，但每一层都要深入。
+
+【写作要求】
+1. 全文必须围绕 core_claim 展开，每个小节都服务于证明或检验这个核心判断。
+2. 不要为了显得全面而铺开多个浅层段落；宁可少写层面，也要把一个机制讲透。
+3. 每个主要分析层面都必须回答五个问题：
+   - 这个现象背后的机制是什么？
+   - 谁从中获益？
+   - 谁承担代价？
+   - 为什么常见解释是错的？
+   - 这个判断能不能被具体例子证明？
+4. 揭示被掩盖的深层结构，挑战至少一个主流假设。
+5. 提供有证据支撑但允许反驳的论证，保持文章的锋利度和思想张力。
+
+【禁止】
+- 禁止写成“主题综述式”文章。
+- 禁止用并列清单覆盖教育、经济、文化、技术等多个层面却每层浅尝辄止。
+- 禁止只解释现象，不追问机制、利益分配和代价转移。
+
+直接输出文章全文，不要包含任何解释或元数据。"""
+
+        if previous_rounds:
+            writing_prompt += "\n\n=== 前几轮迭代参考 ===\n"
+            for prev in previous_rounds[-2:]:
+                if prev.get("writer_output"):
+                    writing_prompt += f"\n轮次{prev['round']}产出：\n{prev['writer_output'][:500]}...\n"
+
+        return writing_prompt
 
     async def _defend(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """为文章辩护"""
