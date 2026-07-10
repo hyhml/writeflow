@@ -22,6 +22,7 @@ from writeflow.output import (
     save_trace,
     slugify_topic,
 )
+from writeflow.progress import ProgressReporter
 
 
 def slugify(text: str, max_len: int = 40) -> str:
@@ -83,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="从文本文件读取人的观察",
         metavar="PATH",
     )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="显示实时 Agent 进度；与 -o 一起使用时保存 _status.json 和 _status.jsonl",
+    )
     return parser
 
 
@@ -128,11 +134,23 @@ async def main() -> int:
     article_path = output_paths.article
     scores_path = output_paths.scores
     trace_path = output_paths.trace
+    status_path = output_paths.status
+    status_log_path = output_paths.status_log
 
     print(f"正在为主题《{topic}》创作批判性文章...")
     print(f"Provider: {settings.provider} | Model: {settings.model}")
     if article_path:
         print(f"输出文件: {article_path}")
+    progress_reporter = None
+    if args.live:
+        progress_reporter = ProgressReporter(
+            live=True,
+            status_path=status_path if article_path else None,
+            status_log_path=status_log_path if article_path else None,
+        )
+        if status_path and status_log_path and article_path:
+            print(f"进度状态: {status_path}")
+            print(f"进度日志: {status_log_path}")
     print("-" * 50)
 
     try:
@@ -140,6 +158,7 @@ async def main() -> int:
         result = await wf.write(
             topic,
             context={"human_observation": human_observation},
+            progress_callback=progress_reporter,
         )
     except ModelClientError as exc:
         print(f"模型调用失败: {exc}")
@@ -180,6 +199,9 @@ async def main() -> int:
         print(f"\n稿件已保存到: {saved_article}")
         print(f"评分已保存到: {saved_scores}")
         print(f"Agent 过程已保存到: {saved_trace}")
+        if args.live and status_path and status_log_path:
+            print(f"进度状态已保存到: {status_path}")
+            print(f"进度日志已保存到: {status_log_path}")
 
     return 0
 

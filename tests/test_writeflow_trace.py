@@ -237,6 +237,11 @@ async def async_write_once():
     return await wf.write("测试主题")
 
 
+async def async_write_once_with_progress(events):
+    wf = wf_module.WriteFlow(max_rounds=1, min_rounds=1)
+    return await wf.write("测试主题", progress_callback=lambda event: events.append(event.to_dict()))
+
+
 def test_precheck_failure_skips_devil_and_sends_feedback_to_next_draft(monkeypatch):
     class SequencedWriter(MockWriter):
         inputs = []
@@ -355,8 +360,109 @@ def test_real_novelty_gate_failure_stops_before_writer(monkeypatch):
 
     assert result.passed is False
     assert result.pass_reason == "no_real_novelty"
+    assert stages.count("thesis_architect_brief") == 2
+    assert stages.count("real_novelty_gate") == 2
     assert "writer_draft" not in stages
     assert CountingWriter.calls == 0
+
+
+def test_progress_callback_reports_novelty_retry_and_stop(monkeypatch):
+    class FailingNoveltyGate:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def process(self, input_data):
+            return {
+                "passed": False,
+                "pass_reason": "no_real_novelty",
+                "novelty_assets": [],
+                "missing_reason": "no_real_novelty",
+                "recommendations": ["重建 case/structure/solution 资产。"],
+            }
+
+    monkeypatch.setattr(wf_module, "ObservationInterviewerAgent", MockObservationInterviewer)
+    monkeypatch.setattr(wf_module, "LocalVoiceCollectorAgent", MockLocalVoiceCollector)
+    monkeypatch.setattr(wf_module, "ResearcherAgent", MockResearcher)
+    monkeypatch.setattr(wf_module, "ThesisArchitectAgent", MockThesisArchitect)
+    monkeypatch.setattr(wf_module, "RealNoveltyGateAgent", FailingNoveltyGate)
+    monkeypatch.setattr(wf_module, "WriterAgent", MockWriter)
+    monkeypatch.setattr(wf_module, "DevilAdvocateAgent", MockDevilAdvocate)
+    monkeypatch.setattr(wf_module, "JudgeAgent", MockJudge)
+    monkeypatch.setattr(wf_module, "EditorAgent", MockEditor)
+
+    events = []
+    result = asyncio.run(async_write_once_with_progress(events))
+
+    assert result.pass_reason == "no_real_novelty"
+    novelty_failed = [
+        event
+        for event in events
+        if event["step"] == "real_novelty_gate" and event["status"] == "failed"
+    ]
+    assert [event["attempt"] for event in novelty_failed] == [1, 2]
+    assert any("不进入 Writer" in event["message"] for event in events)
+
+
+def test_novelty_gate_retry_can_pass_and_enter_writer(monkeypatch):
+    class RetryThenPassNoveltyGate:
+        calls = 0
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def process(self, input_data):
+            RetryThenPassNoveltyGate.calls += 1
+            if RetryThenPassNoveltyGate.calls == 1:
+                return {
+                    "passed": False,
+                    "pass_reason": "no_real_novelty",
+                    "novelty_assets": [],
+                    "missing_reason": "no_real_novelty",
+                    "recommendations": ["重建新意资产。"],
+                }
+            return {
+                "passed": True,
+                "pass_reason": "real_novelty_present",
+                "novelty_assets": [
+                    {
+                        "type": "case",
+                        "claim": "retry case novelty",
+                        "why_different": "different",
+                        "evidence_hint": "evidence",
+                        "must_preserve": "detail",
+                    }
+                ],
+                "missing_reason": "",
+                "recommendations": [],
+            }
+
+    class CountingWriter(MockWriter):
+        calls = 0
+
+        async def process(self, input_data):
+            CountingWriter.calls += 1
+            return await super().process(input_data)
+
+    RetryThenPassNoveltyGate.calls = 0
+    CountingWriter.calls = 0
+    monkeypatch.setattr(wf_module, "ObservationInterviewerAgent", MockObservationInterviewer)
+    monkeypatch.setattr(wf_module, "LocalVoiceCollectorAgent", MockLocalVoiceCollector)
+    monkeypatch.setattr(wf_module, "ResearcherAgent", MockResearcher)
+    monkeypatch.setattr(wf_module, "ThesisArchitectAgent", MockThesisArchitect)
+    monkeypatch.setattr(wf_module, "RealNoveltyGateAgent", RetryThenPassNoveltyGate)
+    monkeypatch.setattr(wf_module, "WriterAgent", CountingWriter)
+    monkeypatch.setattr(wf_module, "DevilAdvocateAgent", MockDevilAdvocate)
+    monkeypatch.setattr(wf_module, "JudgeAgent", MockJudge)
+    monkeypatch.setattr(wf_module, "EditorAgent", MockEditor)
+
+    result = asyncio.run(async_write_once())
+    stages = [event.stage for event in result.trace_events]
+
+    assert result.passed is True
+    assert RetryThenPassNoveltyGate.calls == 2
+    assert CountingWriter.calls > 0
+    assert stages.count("real_novelty_gate") == 2
+    assert "writer_draft" in stages
 
 
 def test_editor_is_not_called_when_final_depth_judge_fails(monkeypatch):

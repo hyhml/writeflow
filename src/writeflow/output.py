@@ -13,11 +13,13 @@ AUTO_OUTPUT = "__auto__"
 
 
 class OutputPaths(NamedTuple):
-    """Article and score output paths."""
+    """Article, score, trace, and live status output paths."""
 
     article: Optional[Path]
     scores: Optional[Path]
     trace: Optional[Path]
+    status: Optional[Path]
+    status_log: Optional[Path]
 
 
 def project_root() -> Path:
@@ -49,6 +51,18 @@ def trace_dir_for(article_path: Path) -> Path:
     return article_path.with_name(f"{article_path.stem}_trace")
 
 
+def status_path_for(article_path: Path) -> Path:
+    """Return the latest live-status JSON path for an article file."""
+
+    return article_path.with_name(f"{article_path.stem}_status.json")
+
+
+def status_log_path_for(article_path: Path) -> Path:
+    """Return the live-status JSONL path for an article file."""
+
+    return article_path.with_name(f"{article_path.stem}_status.jsonl")
+
+
 def build_output_paths(
     topic: str,
     output_arg: Optional[str],
@@ -59,7 +73,13 @@ def build_output_paths(
     """Resolve article and score paths from the CLI --output argument."""
 
     if output_arg is None:
-        return OutputPaths(article=None, scores=None, trace=None)
+        return OutputPaths(
+            article=None,
+            scores=None,
+            trace=None,
+            status=None,
+            status_log=None,
+        )
 
     if output_arg == AUTO_OUTPUT:
         timestamp = (now or datetime.now()).strftime("%Y%m%d_%H%M%S")
@@ -72,6 +92,8 @@ def build_output_paths(
         article=article_path,
         scores=score_path_for(article_path),
         trace=trace_dir_for(article_path),
+        status=status_path_for(article_path),
+        status_log=status_log_path_for(article_path),
     )
 
 
@@ -243,6 +265,9 @@ def save_trace(
         output = event.get("output") or {}
         if isinstance(output, dict) and output.get("decision"):
             decision = f" - {output['decision']}"
+        attempt = event.get("attempt")
+        if attempt:
+            decision += f" (attempt {attempt})"
         timeline_lines.append(
             f"{index}. `{stage}` by `{agent}`{suffix} - {timestamp}{decision}"
         )
@@ -251,8 +276,9 @@ def save_trace(
         encoding="utf-8",
     )
 
+    stage_counts: dict[str, int] = {}
     for event in trace_events:
-        _write_trace_event(trace_path, event)
+        _write_trace_event(trace_path, event, stage_counts)
 
     final_content = getattr(result, "content", "")
     if final_content:
@@ -261,10 +287,17 @@ def save_trace(
     return trace_path
 
 
-def _write_trace_event(trace_path: Path, event: dict[str, Any]) -> None:
+def _write_trace_event(
+    trace_path: Path,
+    event: dict[str, Any],
+    stage_counts: Optional[dict[str, int]] = None,
+) -> None:
     stage = event.get("stage", "")
     output = event.get("output") or {}
     round_number = int(event.get("round") or 0)
+    counts = stage_counts if stage_counts is not None else {}
+    counts[stage] = counts.get(stage, 0) + 1
+    stage_count = counts[stage]
 
     if stage == "observation_interviewer":
         _write_json(trace_path / "01_observation_interviewer.json", output)
@@ -273,9 +306,19 @@ def _write_trace_event(trace_path: Path, event: dict[str, Any]) -> None:
     elif stage == "researcher_materials":
         _write_json(trace_path / "03_researcher_materials.json", output)
     elif stage == "thesis_architect_brief":
-        _write_json(trace_path / "04_thesis_architect_brief.json", output)
+        filename = (
+            "04_thesis_architect_brief.json"
+            if stage_count == 1
+            else f"04_thesis_architect_brief_retry_{stage_count - 1:02d}.json"
+        )
+        _write_json(trace_path / filename, output)
     elif stage == "real_novelty_gate":
-        _write_json(trace_path / "05_real_novelty_gate.json", output)
+        filename = (
+            "05_real_novelty_gate.json"
+            if stage_count == 1
+            else f"05_real_novelty_gate_retry_{stage_count - 1:02d}.json"
+        )
+        _write_json(trace_path / filename, output)
     elif stage == "writer_draft":
         _write_markdown(
             trace_path / f"round_{round_number:02d}_writer_draft.md",

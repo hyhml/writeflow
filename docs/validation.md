@@ -257,3 +257,46 @@ Observation Interviewer
 ```
 
 **结论**：v0.2.8 把“真实新意”前移到写作前。系统不再期待 AI 凭空发明本地经验；没有用户观察或搜索结果时，trace 会明确标记缺失，不编造直接言论。
+
+## v0.2.9 (2026-07-10)
+
+**环境**：Windows Codex workspace, Python 3.14.6
+
+**目标**：新增 Live Progress 进度显示，让 Claude Code / WSL 运行生成任务时能看到当前 Agent、Novelty Gate 是否退回、Judge 是否打回重写；同时修复 v0.2.8 中 Novelty retry trace 被覆盖的问题。
+
+**验证命令**：
+```bash
+python -m compileall -q write.py src tests
+python -m pytest -q
+python -m ruff check .
+```
+
+**运行结果**：
+| 项目 | 状态 |
+|------|------|
+| 版本号 | 0.2.9 |
+| 编译检查 | ✅ 通过 |
+| pytest | ✅ 57 passed |
+| ruff | ✅ All checks passed |
+
+**新增用法**：
+```bash
+python3 write.py "中考分流" -o --live
+python3 write.py "深圳电动车治理" -o --observation-file observation.txt --live
+```
+
+**新增输出**：
+```text
+outputs/<主题>_<时间>_status.json
+outputs/<主题>_<时间>_status.jsonl
+```
+
+**retry trace 修复**：
+```text
+04_thesis_architect_brief.json
+05_real_novelty_gate.json
+04_thesis_architect_brief_retry_01.json
+05_real_novelty_gate_retry_01.json
+```
+
+**结论**：v0.2.9 让长流程运行状态可见，也让 Novelty Gate 退回过程可追踪。第一次失败原因、退回后的 Thesis 和第二次 Gate 结果都会分别保存。

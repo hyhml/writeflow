@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import uuid
 import logging
+import inspect
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 
 from writeflow.agents.observation_interviewer import ObservationInterviewerAgent
 from writeflow.agents.local_voice_collector import LocalVoiceCollectorAgent
@@ -22,6 +23,7 @@ from writeflow.core.debate_graph import DebateGraph, DebateTurn, Criticism
 from writeflow.core.quality_gate import QualityGate, GateResult
 from writeflow.config import get_settings
 from writeflow.output import clean_final_article
+from writeflow.progress import ProgressEvent
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +85,7 @@ class TraceEvent:
     round_number: Optional[int] = None
     input_summary: Dict[str, Any] = field(default_factory=dict)
     output: Any = field(default_factory=dict)
+    attempt: int = 1
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc)
         .isoformat(timespec="seconds")
@@ -96,6 +99,7 @@ class TraceEvent:
             "round": self.round_number,
             "input_summary": self.input_summary,
             "output": self.output,
+            "attempt": self.attempt,
             "created_at": self.created_at,
         }
 
@@ -184,6 +188,7 @@ class WriteFlow:
         topic: str,
         max_rounds: Optional[int] = None,
         context: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[Callable[[ProgressEvent], Any]] = None,
     ) -> WriteResult:
         """
         执行一次完整写作任务
@@ -192,6 +197,7 @@ class WriteFlow:
             topic: 写作主题
             max_rounds: 最大讨论轮次（覆盖默认值）
             context: 额外上下文
+            progress_callback: 可选进度回调，每个阶段开始/结束/失败时调用
 
         Returns:
             WriteResult: 包含content, scores, passed, debate_summary
@@ -205,6 +211,13 @@ class WriteFlow:
         context = context or {}
 
         # Phase 0: 人类观察与真实声音
+        await self._emit_progress(
+            progress_callback,
+            step="observation_interviewer",
+            label="Observation Interviewer",
+            status="started",
+            message="整理人类观察",
+        )
         observation_result = await self._interview_observation(
             task_id,
             topic,
@@ -221,7 +234,21 @@ class WriteFlow:
             },
             output=observation_result,
         )
+        await self._emit_progress(
+            progress_callback,
+            step="observation_interviewer",
+            label="Observation Interviewer",
+            status="completed",
+            message=observation_result.get("source_status", "完成"),
+        )
 
+        await self._emit_progress(
+            progress_callback,
+            step="local_voice_collector",
+            label="Local Voice Collector",
+            status="started",
+            message="收集或标准化本地真实声音",
+        )
         local_voice_result = await self._collect_local_voices(
             task_id,
             topic,
@@ -239,8 +266,22 @@ class WriteFlow:
             },
             output=local_voice_result,
         )
+        await self._emit_progress(
+            progress_callback,
+            step="local_voice_collector",
+            label="Local Voice Collector",
+            status="completed",
+            message=local_voice_result.get("source_status", "完成"),
+        )
 
         # Phase 1: 素材收集
+        await self._emit_progress(
+            progress_callback,
+            step="researcher",
+            label="Researcher",
+            status="started",
+            message="整理参考素材",
+        )
         materials = await self._collect_materials(
             task_id,
             topic,
@@ -260,7 +301,22 @@ class WriteFlow:
             },
             output={"materials": materials},
         )
+        await self._emit_progress(
+            progress_callback,
+            step="researcher",
+            label="Researcher",
+            status="completed",
+            message=f"{len(materials)} materials",
+        )
 
+        await self._emit_progress(
+            progress_callback,
+            step="thesis_architect",
+            label="Thesis Architect",
+            status="started",
+            attempt=1,
+            message="生成核心判断",
+        )
         thesis = await self._build_thesis(
             task_id,
             topic,
@@ -282,7 +338,23 @@ class WriteFlow:
             },
             output=thesis,
         )
+        await self._emit_progress(
+            progress_callback,
+            step="thesis_architect",
+            label="Thesis Architect",
+            status="completed",
+            attempt=1,
+            message="核心判断已生成",
+        )
 
+        await self._emit_progress(
+            progress_callback,
+            step="real_novelty_gate",
+            label="Real Novelty Gate",
+            status="started",
+            attempt=1,
+            message="检查真实新意资产",
+        )
         novelty_result = await self._run_real_novelty_gate(
             task_id,
             topic,
@@ -291,18 +363,43 @@ class WriteFlow:
             materials=materials,
             thesis=thesis,
         )
+        novelty_decision = (
+            "passed, sent to Writer"
+            if novelty_result.get("passed")
+            else "failed, sent back to Thesis Architect"
+        )
+        novelty_trace_output = {**novelty_result, "decision": novelty_decision}
         self._record_trace(
             trace_events,
             stage="real_novelty_gate",
             agent="real_novelty_gate",
+            attempt=1,
             input_summary={
                 "topic": topic,
                 "thesis_core_claim": thesis.get("core_claim", ""),
                 "novelty_retry": False,
             },
-            output=novelty_result,
+            output=novelty_trace_output,
+        )
+        await self._emit_progress(
+            progress_callback,
+            step="real_novelty_gate",
+            label="Real Novelty Gate",
+            status="completed" if novelty_result.get("passed") else "failed",
+            attempt=1,
+            message=novelty_decision
+            if novelty_result.get("passed")
+            else novelty_result.get("pass_reason", "no_real_novelty"),
         )
         if not novelty_result.get("passed"):
+            await self._emit_progress(
+                progress_callback,
+                step="thesis_architect",
+                label="Thesis Architect",
+                status="started",
+                attempt=2,
+                message="退回后重建核心判断",
+            )
             thesis = await self._build_thesis(
                 task_id,
                 topic,
@@ -315,12 +412,29 @@ class WriteFlow:
                 trace_events,
                 stage="thesis_architect_brief",
                 agent="thesis_architect",
+                attempt=2,
                 input_summary={
                     "topic": topic,
                     "materials_count": len(materials),
                     "novelty_retry": True,
                 },
                 output=thesis,
+            )
+            await self._emit_progress(
+                progress_callback,
+                step="thesis_architect",
+                label="Thesis Architect",
+                status="completed",
+                attempt=2,
+                message="重建核心判断完成",
+            )
+            await self._emit_progress(
+                progress_callback,
+                step="real_novelty_gate",
+                label="Real Novelty Gate",
+                status="started",
+                attempt=2,
+                message="复检真实新意资产",
             )
             novelty_result = await self._run_real_novelty_gate(
                 task_id,
@@ -330,20 +444,44 @@ class WriteFlow:
                 materials=materials,
                 thesis=thesis,
             )
+            novelty_decision = (
+                "passed, sent to Writer"
+                if novelty_result.get("passed")
+                else "failed again, stopped before Writer"
+            )
+            novelty_trace_output = {**novelty_result, "decision": novelty_decision}
             self._record_trace(
                 trace_events,
                 stage="real_novelty_gate",
                 agent="real_novelty_gate",
+                attempt=2,
                 input_summary={
                     "topic": topic,
                     "thesis_core_claim": thesis.get("core_claim", ""),
                     "novelty_retry": True,
                 },
-                output=novelty_result,
+                output=novelty_trace_output,
+            )
+            await self._emit_progress(
+                progress_callback,
+                step="real_novelty_gate",
+                label="Real Novelty Gate",
+                status="completed" if novelty_result.get("passed") else "failed",
+                attempt=2,
+                message=novelty_decision
+                if novelty_result.get("passed")
+                else novelty_result.get("pass_reason", "no_real_novelty"),
             )
 
         novelty_assets = novelty_result.get("novelty_assets", [])
         if not novelty_result.get("passed"):
+            await self._emit_progress(
+                progress_callback,
+                step="writer_draft",
+                label="Writer Draft",
+                status="skipped",
+                message="停止：没有真实新意资产，不进入 Writer",
+            )
             self._record_trace(
                 trace_events,
                 stage="final_article",
@@ -379,6 +517,14 @@ class WriteFlow:
             logger.info(f"Task {task_id}: Round {round_num}")
 
             # 2a: Writer生成或根据上一轮判浅反馈重写
+            await self._emit_progress(
+                progress_callback,
+                step="writer_draft",
+                label="Writer Draft",
+                status="started",
+                round_number=round_num,
+                message="生成或重写初稿",
+            )
             content = await self._write_content(
                 task_id,
                 topic,
@@ -404,8 +550,24 @@ class WriteFlow:
                 },
                 output={"content": content},
             )
+            await self._emit_progress(
+                progress_callback,
+                step="writer_draft",
+                label="Writer Draft",
+                status="completed",
+                round_number=round_num,
+                message=f"{len(content)} chars",
+            )
 
             # 2b: Depth Judge初检。浅稿先退回Writer，不进入Devil Advocate。
+            await self._emit_progress(
+                progress_callback,
+                step="judge_precheck",
+                label="Depth Judge Precheck",
+                status="started",
+                round_number=round_num,
+                message="判浅初检",
+            )
             gate_result, judge_output = await self._judge_content(
                 task_id,
                 topic,
@@ -437,6 +599,14 @@ class WriteFlow:
                 },
                 output=precheck_output,
             )
+            await self._emit_progress(
+                progress_callback,
+                step="judge_precheck",
+                label="Depth Judge Precheck",
+                status="completed" if gate_result.passed else "failed",
+                round_number=round_num,
+                message=precheck_output["decision"],
+            )
 
             if not gate_result.passed:
                 rewrite_feedback = self._build_rewrite_feedback(
@@ -450,6 +620,14 @@ class WriteFlow:
                 break
 
             # 2c: Devil's Advocate质疑
+            await self._emit_progress(
+                progress_callback,
+                step="devil_advocate",
+                label="Devil Advocate",
+                status="started",
+                round_number=round_num,
+                message="提出反方质疑",
+            )
             criticisms = await self._criticize(
                 task_id, topic, content, materials, round_num, debate_graph
             )
@@ -464,9 +642,25 @@ class WriteFlow:
                 },
                 output={"criticisms": criticisms},
             )
+            await self._emit_progress(
+                progress_callback,
+                step="devil_advocate",
+                label="Devil Advocate",
+                status="completed",
+                round_number=round_num,
+                message=f"{len(criticisms)} criticisms",
+            )
 
             # 2d: Writer直接修订正文，而不是输出辩护说明
             source_content = content
+            await self._emit_progress(
+                progress_callback,
+                step="writer_revision",
+                label="Writer Revision",
+                status="started",
+                round_number=round_num,
+                message="根据 Judge 和质疑修订正文",
+            )
             content = await self._revise_content(
                 task_id,
                 topic,
@@ -497,8 +691,24 @@ class WriteFlow:
                 },
                 output={"content": content},
             )
+            await self._emit_progress(
+                progress_callback,
+                step="writer_revision",
+                label="Writer Revision",
+                status="completed",
+                round_number=round_num,
+                message=f"{len(content)} chars",
+            )
 
             # 2e: 修订稿再次判浅，通过后才进入Editor
+            await self._emit_progress(
+                progress_callback,
+                step="judge_final",
+                label="Depth Judge Final",
+                status="started",
+                round_number=round_num,
+                message="终检修订稿",
+            )
             gate_result, judge_output = await self._judge_content(
                 task_id,
                 topic,
@@ -528,6 +738,18 @@ class WriteFlow:
                     ),
                 },
             )
+            await self._emit_progress(
+                progress_callback,
+                step="judge_final",
+                label="Depth Judge Final",
+                status="completed" if gate_result.passed else "failed",
+                round_number=round_num,
+                message=(
+                    "Depth final passed; sent to Editor"
+                    if gate_result.passed
+                    else "Judge failed, sent back to Writer"
+                ),
+            )
 
             # 检查是否通过
             if gate_result.passed:
@@ -543,6 +765,13 @@ class WriteFlow:
 
         # Phase N+1: Editor打磨
         if gate_result and gate_result.passed:
+            await self._emit_progress(
+                progress_callback,
+                step="editor",
+                label="Editor",
+                status="started",
+                message="最终编辑清洗",
+            )
             editor_raw, content = await self._edit_content(
                 task_id, content, current_scores, thesis
             )
@@ -552,6 +781,21 @@ class WriteFlow:
                 agent="editor",
                 input_summary={"source_content_chars": len(editor_raw)},
                 output={"raw_content": editor_raw, "clean_content": content},
+            )
+            await self._emit_progress(
+                progress_callback,
+                step="editor",
+                label="Editor",
+                status="completed",
+                message=f"{len(content)} chars",
+            )
+        else:
+            await self._emit_progress(
+                progress_callback,
+                step="editor",
+                label="Editor",
+                status="skipped",
+                message="未通过 Gate，跳过 Editor",
             )
 
         content = clean_final_article(content)
@@ -936,6 +1180,7 @@ class WriteFlow:
         stage: str,
         agent: str,
         round_number: Optional[int] = None,
+        attempt: int = 1,
         input_summary: Optional[Dict[str, Any]] = None,
         output: Any = None,
     ) -> None:
@@ -944,10 +1189,38 @@ class WriteFlow:
                 stage=stage,
                 agent=agent,
                 round_number=round_number,
+                attempt=attempt,
                 input_summary=input_summary or {},
                 output=output or {},
             )
         )
+
+    async def _emit_progress(
+        self,
+        progress_callback: Optional[Callable[[ProgressEvent], Any]],
+        *,
+        step: str,
+        label: str,
+        status: str,
+        attempt: int = 1,
+        message: str = "",
+        round_number: Optional[int] = None,
+    ) -> None:
+        """Emit one live progress event to an optional callback."""
+        if progress_callback is None:
+            return
+
+        event = ProgressEvent(
+            step=step,
+            label=label,
+            status=status,
+            attempt=attempt,
+            message=message,
+            round_number=round_number,
+        )
+        result = progress_callback(event)
+        if inspect.isawaitable(result):
+            await result
 
     def _gate_result_to_dict(self, gate_result: GateResult) -> Dict[str, Any]:
         return {

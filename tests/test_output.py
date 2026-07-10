@@ -51,6 +51,8 @@ def test_build_auto_output_paths(tmp_path):
     assert paths.article == tmp_path / "中考_分流_20260709_103001.md"
     assert paths.scores == tmp_path / "中考_分流_20260709_103001_scores.json"
     assert paths.trace == tmp_path / "中考_分流_20260709_103001_trace"
+    assert paths.status == tmp_path / "中考_分流_20260709_103001_status.json"
+    assert paths.status_log == tmp_path / "中考_分流_20260709_103001_status.jsonl"
 
 
 def test_build_explicit_output_path():
@@ -59,6 +61,8 @@ def test_build_explicit_output_path():
     assert str(paths.article).replace("\\", "/") == "custom/article.md"
     assert str(paths.scores).replace("\\", "/") == "custom/article_scores.json"
     assert str(paths.trace).replace("\\", "/") == "custom/article_trace"
+    assert str(paths.status).replace("\\", "/") == "custom/article_status.json"
+    assert str(paths.status_log).replace("\\", "/") == "custom/article_status.jsonl"
 
 
 def test_save_article_and_scores(tmp_path):
@@ -224,3 +228,71 @@ def test_save_trace_writes_agent_files(tmp_path):
     assert (trace_dir / "final_article.md").read_text(encoding="utf-8") == "# 最终稿\n\n正文\n"
     timeline = (trace_dir / "00_timeline.md").read_text(encoding="utf-8")
     assert "Depth precheck passed; sent to Devil Advocate" in timeline
+
+
+def test_save_trace_preserves_novelty_retry_files(tmp_path):
+    result = DummyResult(content="")
+    result.trace_events = [
+        {
+            "stage": "thesis_architect_brief",
+            "agent": "thesis_architect",
+            "round": None,
+            "attempt": 1,
+            "input_summary": {},
+            "output": {"core_claim": "first thesis"},
+            "created_at": "2026-07-09T10:00:00Z",
+        },
+        {
+            "stage": "real_novelty_gate",
+            "agent": "real_novelty_gate",
+            "round": None,
+            "attempt": 1,
+            "input_summary": {},
+            "output": {
+                "passed": False,
+                "pass_reason": "no_real_novelty",
+                "decision": "failed, sent back to Thesis Architect",
+            },
+            "created_at": "2026-07-09T10:01:00Z",
+        },
+        {
+            "stage": "thesis_architect_brief",
+            "agent": "thesis_architect",
+            "round": None,
+            "attempt": 2,
+            "input_summary": {},
+            "output": {"core_claim": "retry thesis"},
+            "created_at": "2026-07-09T10:02:00Z",
+        },
+        {
+            "stage": "real_novelty_gate",
+            "agent": "real_novelty_gate",
+            "round": None,
+            "attempt": 2,
+            "input_summary": {},
+            "output": {
+                "passed": False,
+                "pass_reason": "no_real_novelty",
+                "decision": "failed again, stopped before Writer",
+            },
+            "created_at": "2026-07-09T10:03:00Z",
+        },
+    ]
+
+    trace_dir = save_trace(tmp_path / "article_trace", topic="主题", result=result)
+
+    first_thesis = json.loads(
+        (trace_dir / "04_thesis_architect_brief.json").read_text(encoding="utf-8")
+    )
+    retry_thesis = json.loads(
+        (trace_dir / "04_thesis_architect_brief_retry_01.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert first_thesis["core_claim"] == "first thesis"
+    assert retry_thesis["core_claim"] == "retry thesis"
+    assert (trace_dir / "05_real_novelty_gate.json").exists()
+    assert (trace_dir / "05_real_novelty_gate_retry_01.json").exists()
+    timeline = (trace_dir / "00_timeline.md").read_text(encoding="utf-8")
+    assert "failed, sent back to Thesis Architect" in timeline
+    assert "failed again, stopped before Writer" in timeline

@@ -9,6 +9,7 @@ from pathlib import Path
 from writeflow import __version__
 from writeflow.agents.llm_client import ModelClientError
 from writeflow.config import get_settings, validate_runtime_settings
+from writeflow.progress import ProgressReporter
 from writeflow.writeflow import WriteFlow
 
 
@@ -28,7 +29,7 @@ WriteFLow - 批判性深度稿件多 Agent 生产系统
 示例:
   writeflow start
   writeflow submit "当代资本主义的结构性矛盾"
-  writeflow submit "深圳电动车治理" --observation "我看到的本地反常现象..."
+  writeflow submit "深圳电动车治理" --observation "我看到的本地反常现象..." --live
   writeflow status abc123-def456
 
 更多帮助: writeflow --help
@@ -107,6 +108,7 @@ async def cmd_submit(args: list[str]) -> int:
     parser.add_argument("topic", nargs="+")
     parser.add_argument("--observation", default="")
     parser.add_argument("--observation-file", default="")
+    parser.add_argument("--live", action="store_true")
     parsed = parser.parse_args(args)
 
     settings = get_settings()
@@ -132,7 +134,11 @@ async def cmd_submit(args: list[str]) -> int:
     print(f"Provider: {settings.provider} | Model: {settings.model}")
 
     wf = WriteFlow()
-    result = await wf.write(topic, context={"human_observation": human_observation})
+    result = await wf.write(
+        topic,
+        context={"human_observation": human_observation},
+        progress_callback=ProgressReporter(live=True) if parsed.live else None,
+    )
 
     print("\n任务完成!")
     print(f"判浅评分: {result.scores.to_dict()}")

@@ -74,8 +74,22 @@ class DummyResult:
 class DummyWriteFlow:
     context_seen = None
 
-    async def write(self, topic, context=None):
+    async def write(self, topic, context=None, progress_callback=None):
         DummyWriteFlow.context_seen = context
+        if progress_callback:
+            progress_callback(
+                {
+                    "step": "researcher",
+                    "label": "Researcher",
+                    "status": "completed",
+                    "attempt": 1,
+                    "message": "mock complete",
+                    "round": None,
+                    "created_at": "2026-07-10T00:00:00Z",
+                    "step_index": 3,
+                    "total_steps": 11,
+                }
+            )
         return DummyResult()
 
 
@@ -101,6 +115,31 @@ def test_write_py_saves_article_scores_and_trace(monkeypatch, tmp_path):
     assert (trace_dir / "00_timeline.md").exists()
     assert (trace_dir / "round_01_writer_draft.md").exists()
     assert (trace_dir / "final_article.md").exists()
+
+
+def test_write_py_live_saves_status_files(monkeypatch, tmp_path, capsys):
+    output_path = tmp_path / "article.md"
+    monkeypatch.setenv("WRITEFLOW_PROVIDER", "minimax")
+    monkeypatch.setenv("MINIMAX_API_KEY", "fake-key")
+    monkeypatch.delenv("WRITEFLOW_API_KEY", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["write.py", "测试主题", "-o", str(output_path), "--live"],
+    )
+    config.reset_settings_cache()
+    monkeypatch.setattr(config, "_dotenv_loaded", True)
+
+    module = load_write_module()
+    monkeypatch.setattr(module, "WriteFlow", lambda: DummyWriteFlow())
+
+    exit_code = asyncio.run(module.main())
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Researcher" in output
+    assert (tmp_path / "article_status.json").exists()
+    assert (tmp_path / "article_status.jsonl").exists()
 
 
 def test_write_py_passes_observation_file_to_context(monkeypatch, tmp_path):
