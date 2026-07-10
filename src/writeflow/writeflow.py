@@ -9,8 +9,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
+from writeflow.agents.observation_interviewer import ObservationInterviewerAgent
+from writeflow.agents.local_voice_collector import LocalVoiceCollectorAgent
 from writeflow.agents.researcher import ResearcherAgent
 from writeflow.agents.thesis_architect import ThesisArchitectAgent
+from writeflow.agents.real_novelty_gate import RealNoveltyGateAgent
 from writeflow.agents.writer import WriterAgent
 from writeflow.agents.devil_advocate import DevilAdvocateAgent
 from writeflow.agents.judge import JudgeAgent
@@ -25,8 +28,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class QualityScores:
-    """5项判浅评分"""
-    新判断: float = 0.0
+    """4项判浅评分"""
     概念克制: float = 0.0
     句子必要性: float = 0.0
     层次穿透: float = 0.0
@@ -35,8 +37,7 @@ class QualityScores:
     def total(self) -> float:
         """总分"""
         return (
-            self.新判断
-            + self.概念克制
+            self.概念克制
             + self.句子必要性
             + self.层次穿透
             + self.方案具体性
@@ -161,8 +162,11 @@ class WriteFlow:
 
         # 初始化Agent
         self.agents = {
+            "observation_interviewer": ObservationInterviewerAgent(api_key=api_key),
+            "local_voice_collector": LocalVoiceCollectorAgent(api_key=api_key),
             "researcher": ResearcherAgent(api_key=api_key),
             "thesis_architect": ThesisArchitectAgent(api_key=api_key),
+            "real_novelty_gate": RealNoveltyGateAgent(api_key=api_key),
             "writer": WriterAgent(api_key=api_key),
             "devil_advocate": DevilAdvocateAgent(api_key=api_key),
             "judge": JudgeAgent(api_key=api_key),
@@ -198,17 +202,72 @@ class WriteFlow:
 
         logger.info(f"Task {task_id}: Starting write for topic: {topic}")
 
+        context = context or {}
+
+        # Phase 0: 人类观察与真实声音
+        observation_result = await self._interview_observation(
+            task_id,
+            topic,
+            human_observation=context.get("human_observation", ""),
+        )
+        observation_brief = observation_result.get("observation_brief", {})
+        self._record_trace(
+            trace_events,
+            stage="observation_interviewer",
+            agent="observation_interviewer",
+            input_summary={
+                "topic": topic,
+                "has_human_observation": bool(context.get("human_observation")),
+            },
+            output=observation_result,
+        )
+
+        local_voice_result = await self._collect_local_voices(
+            task_id,
+            topic,
+            observation_brief=observation_brief,
+            search_results=context.get("search_results", []),
+        )
+        local_voice_brief = local_voice_result.get("local_voice_brief", {})
+        self._record_trace(
+            trace_events,
+            stage="local_voice_collector",
+            agent="local_voice_collector",
+            input_summary={
+                "topic": topic,
+                "search_results_count": len(context.get("search_results", []) or []),
+            },
+            output=local_voice_result,
+        )
+
         # Phase 1: 素材收集
-        materials = await self._collect_materials(task_id, topic)
+        materials = await self._collect_materials(
+            task_id,
+            topic,
+            observation_brief=observation_brief,
+            local_voice_brief=local_voice_brief,
+        )
         self._record_trace(
             trace_events,
             stage="researcher_materials",
             agent="researcher",
-            input_summary={"topic": topic},
+            input_summary={
+                "topic": topic,
+                "has_observation": bool(observation_brief),
+                "local_voice_count": len(local_voice_brief.get("voices", []))
+                if isinstance(local_voice_brief, dict)
+                else 0,
+            },
             output={"materials": materials},
         )
 
-        thesis = await self._build_thesis(task_id, topic, materials)
+        thesis = await self._build_thesis(
+            task_id,
+            topic,
+            materials,
+            observation_brief=observation_brief,
+            local_voice_brief=local_voice_brief,
+        )
         self._record_trace(
             trace_events,
             stage="thesis_architect_brief",
@@ -216,9 +275,96 @@ class WriteFlow:
             input_summary={
                 "topic": topic,
                 "materials_count": len(materials),
+                "has_observation": bool(observation_brief),
+                "local_voice_count": len(local_voice_brief.get("voices", []))
+                if isinstance(local_voice_brief, dict)
+                else 0,
             },
             output=thesis,
         )
+
+        novelty_result = await self._run_real_novelty_gate(
+            task_id,
+            topic,
+            observation_brief=observation_brief,
+            local_voice_brief=local_voice_brief,
+            materials=materials,
+            thesis=thesis,
+        )
+        self._record_trace(
+            trace_events,
+            stage="real_novelty_gate",
+            agent="real_novelty_gate",
+            input_summary={
+                "topic": topic,
+                "thesis_core_claim": thesis.get("core_claim", ""),
+                "novelty_retry": False,
+            },
+            output=novelty_result,
+        )
+        if not novelty_result.get("passed"):
+            thesis = await self._build_thesis(
+                task_id,
+                topic,
+                materials,
+                observation_brief=observation_brief,
+                local_voice_brief=local_voice_brief,
+                novelty_feedback=novelty_result,
+            )
+            self._record_trace(
+                trace_events,
+                stage="thesis_architect_brief",
+                agent="thesis_architect",
+                input_summary={
+                    "topic": topic,
+                    "materials_count": len(materials),
+                    "novelty_retry": True,
+                },
+                output=thesis,
+            )
+            novelty_result = await self._run_real_novelty_gate(
+                task_id,
+                topic,
+                observation_brief=observation_brief,
+                local_voice_brief=local_voice_brief,
+                materials=materials,
+                thesis=thesis,
+            )
+            self._record_trace(
+                trace_events,
+                stage="real_novelty_gate",
+                agent="real_novelty_gate",
+                input_summary={
+                    "topic": topic,
+                    "thesis_core_claim": thesis.get("core_claim", ""),
+                    "novelty_retry": True,
+                },
+                output=novelty_result,
+            )
+
+        novelty_assets = novelty_result.get("novelty_assets", [])
+        if not novelty_result.get("passed"):
+            self._record_trace(
+                trace_events,
+                stage="final_article",
+                agent="writeflow",
+                input_summary={"topic": topic},
+                output={"content": ""},
+            )
+            debate_summary = DebateSummary(
+                key_issues=novelty_result.get("recommendations", []),
+                rounds=0,
+            )
+            return WriteResult(
+                content="",
+                scores=QualityScores(),
+                passed=False,
+                pass_reason=novelty_result.get("pass_reason", "no_real_novelty"),
+                debate_summary=debate_summary,
+                rounds=0,
+                task_id=task_id,
+                trace_events=trace_events,
+            )
 
         # Phase 2-N: 讨论循环
         debate_graph = DebateGraph()
@@ -238,6 +384,10 @@ class WriteFlow:
                 topic,
                 materials,
                 thesis,
+                observation_brief,
+                local_voice_brief,
+                novelty_assets,
+                rewrite_feedback.get("depth_questions", []),
                 round_num,
                 content,
                 rewrite_feedback,
@@ -262,6 +412,8 @@ class WriteFlow:
                 content,
                 criticisms=[],
                 materials=materials,
+                thesis=thesis,
+                novelty_assets=novelty_assets,
             )
             current_scores = self._parse_scores(gate_result)
             precheck_output = {
@@ -320,6 +472,10 @@ class WriteFlow:
                 topic,
                 materials,
                 thesis,
+                observation_brief,
+                local_voice_brief,
+                novelty_assets,
+                (judge_output.get("depth_questions") or gate_result.depth_questions),
                 round_num,
                 source_content,
                 self._build_rewrite_feedback(
@@ -349,6 +505,8 @@ class WriteFlow:
                 content,
                 criticisms=criticisms,
                 materials=materials,
+                thesis=thesis,
+                novelty_assets=novelty_assets,
             )
             current_scores = self._parse_scores(gate_result)
             self._record_trace(
@@ -459,13 +617,47 @@ class WriteFlow:
                 ))
         return results
 
+    async def _interview_observation(
+        self,
+        task_id: str,
+        topic: str,
+        human_observation: str = "",
+    ) -> Dict[str, Any]:
+        """整理用户提供的人类观察；没有观察时只返回问题清单。"""
+        return await self.agents["observation_interviewer"].process({
+            "task_id": task_id,
+            "topic": topic,
+            "human_observation": human_observation,
+        })
+
+    async def _collect_local_voices(
+        self,
+        task_id: str,
+        topic: str,
+        observation_brief: Dict[str, Any],
+        search_results: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """收集或标准化真实声音；无搜索配置时不得编造引语。"""
+        return await self.agents["local_voice_collector"].process({
+            "task_id": task_id,
+            "topic": topic,
+            "observation_brief": observation_brief,
+            "search_results": search_results or [],
+        })
+
     async def _collect_materials(
-        self, task_id: str, topic: str
+        self,
+        task_id: str,
+        topic: str,
+        observation_brief: Optional[Dict[str, Any]] = None,
+        local_voice_brief: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """素材收集"""
         result = await self.agents["researcher"].process({
             "task_id": task_id,
             "topic": topic,
+            "observation_brief": observation_brief or {},
+            "local_voice_brief": local_voice_brief or {},
             "material_types": ["data", "case", "theory", "quote", "history"],
             "depth_level": "deep",
         })
@@ -476,12 +668,18 @@ class WriteFlow:
         task_id: str,
         topic: str,
         materials: List[Dict[str, Any]],
+        observation_brief: Optional[Dict[str, Any]] = None,
+        local_voice_brief: Optional[Dict[str, Any]] = None,
+        novelty_feedback: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Build the core thesis brief before drafting."""
         result = await self.agents["thesis_architect"].process({
             "task_id": task_id,
             "topic": topic,
             "materials": materials,
+            "observation_brief": observation_brief or {},
+            "local_voice_brief": local_voice_brief or {},
+            "novelty_feedback": novelty_feedback or {},
         })
         known_fields = {
             "core_claim",
@@ -489,6 +687,7 @@ class WriteFlow:
             "common_sense_overturned",
             "strongest_evidence",
             "most_dangerous_counterargument",
+            "novelty_assets",
         }
         return {
             "core_claim": result.get("core_claim", ""),
@@ -498,8 +697,28 @@ class WriteFlow:
             "most_dangerous_counterargument": result.get(
                 "most_dangerous_counterargument", ""
             ),
+            "novelty_assets": result.get("novelty_assets", []),
             **{key: value for key, value in result.items() if key not in known_fields},
         }
+
+    async def _run_real_novelty_gate(
+        self,
+        task_id: str,
+        topic: str,
+        observation_brief: Dict[str, Any],
+        local_voice_brief: Dict[str, Any],
+        materials: List[Dict[str, Any]],
+        thesis: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Run the one-vote novelty gate before drafting."""
+        return await self.agents["real_novelty_gate"].process({
+            "task_id": task_id,
+            "topic": topic,
+            "observation_brief": observation_brief,
+            "local_voice_brief": local_voice_brief,
+            "materials": materials,
+            "thesis": thesis,
+        })
 
     async def _write_content(
         self,
@@ -507,6 +726,10 @@ class WriteFlow:
         topic: str,
         materials: List[Dict],
         thesis: Dict[str, Any],
+        observation_brief: Dict[str, Any],
+        local_voice_brief: Dict[str, Any],
+        novelty_assets: List[Dict[str, Any]],
+        depth_questions: List[Dict[str, Any]],
         round_num: int,
         previous_content: str,
         rewrite_feedback: Optional[Dict[str, Any]] = None,
@@ -527,6 +750,10 @@ class WriteFlow:
             "topic": topic,
             "materials": materials,
             "thesis": thesis,
+            "observation_brief": observation_brief,
+            "local_voice_brief": local_voice_brief,
+            "novelty_assets": novelty_assets,
+            "depth_questions": depth_questions,
             "previous_rounds": previous_rounds,
             "rewrite_feedback": rewrite_feedback or {},
         })
@@ -538,6 +765,10 @@ class WriteFlow:
         topic: str,
         materials: List[Dict],
         thesis: Dict[str, Any],
+        observation_brief: Dict[str, Any],
+        local_voice_brief: Dict[str, Any],
+        novelty_assets: List[Dict[str, Any]],
+        depth_questions: List[Dict[str, Any]],
         round_num: int,
         content: str,
         judge_feedback: Dict[str, Any],
@@ -551,6 +782,10 @@ class WriteFlow:
             "topic": topic,
             "materials": materials,
             "thesis": thesis,
+            "observation_brief": observation_brief,
+            "local_voice_brief": local_voice_brief,
+            "novelty_assets": novelty_assets,
+            "depth_questions": depth_questions,
             "content": content,
             "judge_feedback": judge_feedback,
             "criticisms": criticisms,
@@ -653,6 +888,8 @@ class WriteFlow:
         *,
         criticisms: List[Dict],
         materials: List[Dict],
+        thesis: Optional[Dict[str, Any]] = None,
+        novelty_assets: Optional[List[Dict[str, Any]]] = None,
         defenses: str = "",
     ) -> tuple[GateResult, Dict[str, Any]]:
         """统一执行Depth Judge和Quality Gate。"""
@@ -663,10 +900,15 @@ class WriteFlow:
             "criticisms": criticisms,
             "defenses": defenses,
             "materials": materials,
+            "thesis": thesis or {},
+            "novelty_assets": novelty_assets or [],
         })
 
         scores = self._parse_scores_from_result(result)
-        return self.gate.evaluate(scores.to_dict()), result
+        return self.gate.evaluate(
+            scores.to_dict(),
+            depth_questions=result.get("depth_questions", []),
+        ), result
 
     async def _edit_content(
         self,
@@ -716,6 +958,7 @@ class WriteFlow:
             "failed_dimensions": gate_result.failed_dimensions,
             "total_score": gate_result.total_score,
             "recommendations": gate_result.recommendations,
+            "depth_questions": gate_result.depth_questions,
         }
 
     def _build_rewrite_feedback(
@@ -736,6 +979,8 @@ class WriteFlow:
             "key_issues": judge_output.get("key_issues", []),
             "recommendations": gate_result.recommendations
             or judge_output.get("recommendations", []),
+            "depth_questions": gate_result.depth_questions
+            or judge_output.get("depth_questions", []),
             "criticisms": criticisms,
         }
 
@@ -762,9 +1007,8 @@ class WriteFlow:
         return self._scores_from_dict(scores_dict)
 
     def _scores_from_dict(self, scores_dict: Dict[str, Any]) -> QualityScores:
-        """Map raw judge scores to the five depth-check dimensions."""
+        """Map raw judge scores to the four depth-check dimensions."""
         return QualityScores(
-            新判断=self._coerce_score(scores_dict.get("新判断", 0)),
             概念克制=self._coerce_score(scores_dict.get("概念克制", 0)),
             句子必要性=self._coerce_score(scores_dict.get("句子必要性", 0)),
             层次穿透=self._coerce_score(scores_dict.get("层次穿透", 0)),

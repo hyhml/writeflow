@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
@@ -71,6 +72,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="保存稿件到文件。不带路径时自动命名到 outputs/ 目录",
         metavar="PATH",
     )
+    parser.add_argument(
+        "--observation",
+        default="",
+        help="直接提供人的本地观察、直觉问题和具体方案",
+    )
+    parser.add_argument(
+        "--observation-file",
+        default="",
+        help="从文本文件读取人的观察",
+        metavar="PATH",
+    )
     return parser
 
 
@@ -87,6 +99,14 @@ async def main() -> int:
     args = parser.parse_args()
 
     topic = " ".join(args.topic)
+    try:
+        human_observation = read_observation_input(
+            args.observation,
+            args.observation_file,
+        )
+    except OSError as exc:
+        print(f"观察文件读取失败: {exc}")
+        return 1
 
     try:
         settings = get_settings()
@@ -117,7 +137,10 @@ async def main() -> int:
 
     try:
         wf = WriteFlow()
-        result = await wf.write(topic)
+        result = await wf.write(
+            topic,
+            context={"human_observation": human_observation},
+        )
     except ModelClientError as exc:
         print(f"模型调用失败: {exc}")
         return 1
@@ -128,7 +151,7 @@ async def main() -> int:
     print("\n=== 稿件内容 ===\n")
     print(result.content)
 
-    print("\n=== 7维质量评分 ===\n")
+    print("\n=== 4项判浅评分 ===\n")
     print_scores(result.scores)
 
     print("\n=== 质量 Gate ===")
@@ -159,6 +182,14 @@ async def main() -> int:
         print(f"Agent 过程已保存到: {saved_trace}")
 
     return 0
+
+
+def read_observation_input(observation: str = "", observation_file: str = "") -> str:
+    """Read optional human observation from CLI text or a UTF-8 file."""
+
+    if observation_file:
+        return Path(observation_file).read_text(encoding="utf-8").strip()
+    return observation.strip()
 
 
 if __name__ == "__main__":

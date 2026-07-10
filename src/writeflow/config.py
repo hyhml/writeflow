@@ -53,6 +53,7 @@ class Settings:
     max_rounds: int
     min_rounds: int
     quality_depth_threshold: float
+    search_provider: str = "none"
 
     @property
     def claude_model(self) -> str:
@@ -218,6 +219,7 @@ def get_settings(refresh: bool = False) -> Settings:
         max_rounds=_env_int("MAX_ROUND", _env_int("WRITEFLOW_MAX_ROUNDS", 5)),
         min_rounds=_env_int("MIN_ROUND", _env_int("WRITEFLOW_MIN_ROUNDS", 2)),
         quality_depth_threshold=_env_float("QUALITY_DEPTH_THRESHOLD", 6.0),
+        search_provider=_env("WRITEFLOW_SEARCH_PROVIDER", "none").lower() or "none",
     )
     return _settings
 

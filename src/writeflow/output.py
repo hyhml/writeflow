@@ -266,10 +266,16 @@ def _write_trace_event(trace_path: Path, event: dict[str, Any]) -> None:
     output = event.get("output") or {}
     round_number = int(event.get("round") or 0)
 
-    if stage == "researcher_materials":
-        _write_json(trace_path / "01_researcher_materials.json", output)
+    if stage == "observation_interviewer":
+        _write_json(trace_path / "01_observation_interviewer.json", output)
+    elif stage == "local_voice_collector":
+        _write_json(trace_path / "02_local_voice_collector.json", output)
+    elif stage == "researcher_materials":
+        _write_json(trace_path / "03_researcher_materials.json", output)
     elif stage == "thesis_architect_brief":
-        _write_json(trace_path / "02_thesis_architect_brief.json", output)
+        _write_json(trace_path / "04_thesis_architect_brief.json", output)
+    elif stage == "real_novelty_gate":
+        _write_json(trace_path / "05_real_novelty_gate.json", output)
     elif stage == "writer_draft":
         _write_markdown(
             trace_path / f"round_{round_number:02d}_writer_draft.md",

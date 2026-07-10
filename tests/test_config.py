@@ -21,6 +21,7 @@ ENV_KEYS = [
     "ANTHROPIC_API_KEY",
     "CLAUDE_MODEL",
     "OPENAI_API_KEY",
+    "WRITEFLOW_SEARCH_PROVIDER",
 ]
 
 
@@ -43,6 +44,7 @@ def test_detects_minimax_provider_from_key(monkeypatch):
     assert settings.model == "MiniMax-M1"
     assert settings.base_url == "https://api.minimax.chat/v1"
     assert settings.api_key == "mini-key"
+    assert settings.search_provider == "none"
     assert config.validate_runtime_settings(settings) == []
 
 

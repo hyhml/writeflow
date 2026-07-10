@@ -54,10 +54,11 @@ WRITER_REVISION_PROMPT = """你是一位批判性思维作家，现在需要直�
 你的任务不是解释你如何回应质疑，也不是输出辩护清单，而是把 Judge 和 Devil Advocate 指出的真实问题吸收到文章里，直接交付一篇更强的完整文章。
 
 【修订原则】
-1. 优先解决 Judge 标出的浅度问题：新判断、概念克制、句子必要性、层次穿透、方案具体性。
-2. 如果 Devil Advocate 的质疑成立，把它转化为正文中的更强论证或更具体证据。
-3. 如果质疑不成立，也不要写“我不同意”，而是在正文中用更清楚的推理消解它。
-4. 保持 Thesis Architect 的 core_claim，不要把文章改成折中综述。
+1. 优先解决 Judge 标出的浅度问题：概念克制、句子必要性、层次穿透、方案具体性。
+2. 优先回答 depth_questions 中 status 为 missing 或 not_deep_enough 的具体追问。
+3. 如果 Devil Advocate 的质疑成立，把它转化为正文中的更强论证或更具体证据。
+4. 如果质疑不成立，也不要写“我不同意”，而是在正文中用更清楚的推理消解它。
+5. 保持 Thesis Architect 的 core_claim，不要把文章改成折中综述。
 
 【禁止】
 - 不要输出修改说明。
@@ -106,6 +107,10 @@ class WriterAgent(BaseAgent):
         topic = input_data.get("topic", "")
         materials = input_data.get("materials", [])
         thesis = input_data.get("thesis", {})
+        observation_brief = input_data.get("observation_brief", {})
+        local_voice_brief = input_data.get("local_voice_brief", {})
+        novelty_assets = input_data.get("novelty_assets", [])
+        depth_questions = input_data.get("depth_questions", [])
         previous_rounds = input_data.get("previous_rounds", [])
         rewrite_feedback = input_data.get("rewrite_feedback", {})
 
@@ -113,6 +118,10 @@ class WriterAgent(BaseAgent):
             topic=topic,
             thesis=thesis,
             materials=materials,
+            observation_brief=observation_brief,
+            local_voice_brief=local_voice_brief,
+            novelty_assets=novelty_assets,
+            depth_questions=depth_questions,
             previous_rounds=previous_rounds,
             rewrite_feedback=rewrite_feedback,
         )
@@ -139,17 +148,33 @@ class WriterAgent(BaseAgent):
         thesis: dict,
         materials: list,
         previous_rounds: list,
+        observation_brief: dict | None = None,
+        local_voice_brief: dict | None = None,
+        novelty_assets: list | None = None,
+        depth_questions: list | None = None,
         rewrite_feedback: dict | None = None,
     ) -> str:
         """Build the drafting prompt around one central argument."""
         materials_context = self._build_materials_context(materials)
         thesis_context = self._build_thesis_context(thesis)
+        observation_context = self._build_observation_context(observation_brief or {})
+        local_voice_context = self._build_local_voice_context(local_voice_brief or {})
+        novelty_context = self._build_novelty_assets_context(novelty_assets or [])
+        depth_question_context = self._build_depth_questions_context(depth_questions or [])
 
         writing_prompt = f"""请围绕以下主题撰写一篇批判性分析文章：
 
 主题：{topic}
 
 {thesis_context}
+
+{observation_context}
+
+{local_voice_context}
+
+{novelty_context}
+
+{depth_question_context}
 
 {materials_context}
 
@@ -168,6 +193,8 @@ class WriterAgent(BaseAgent):
    - 这个判断能不能被具体例子证明？
 4. 揭示被掩盖的深层结构，挑战至少一个主流假设。
 5. 提供有证据支撑但允许反驳的论证，保持文章的锋利度和思想张力。
+6. novelty_assets 是文章必须守住的真实新意，不要把它们稀释成泛泛而谈。
+7. 如果有人类观察或本地声音，必须把它们转化为具体机制、利益冲突和行动方案，而不是装饰性引用。
 
 【禁止】
 - 禁止写成“主题综述式”文章。
@@ -193,6 +220,10 @@ class WriterAgent(BaseAgent):
         content = input_data.get("content", "")
         materials = input_data.get("materials", [])
         thesis = input_data.get("thesis", {})
+        observation_brief = input_data.get("observation_brief", {})
+        local_voice_brief = input_data.get("local_voice_brief", {})
+        novelty_assets = input_data.get("novelty_assets", [])
+        depth_questions = input_data.get("depth_questions", [])
         judge_feedback = input_data.get("judge_feedback", {})
         criticisms = input_data.get("criticisms", [])
 
@@ -201,6 +232,10 @@ class WriterAgent(BaseAgent):
             content=content,
             thesis=thesis,
             materials=materials,
+            observation_brief=observation_brief,
+            local_voice_brief=local_voice_brief,
+            novelty_assets=novelty_assets,
+            depth_questions=depth_questions,
             judge_feedback=judge_feedback,
             criticisms=criticisms,
         )
@@ -229,6 +264,10 @@ class WriterAgent(BaseAgent):
         materials: list,
         judge_feedback: dict,
         criticisms: list,
+        observation_brief: dict | None = None,
+        local_voice_brief: dict | None = None,
+        novelty_assets: list | None = None,
+        depth_questions: list | None = None,
     ) -> str:
         """Build a direct article-revision prompt."""
         prompt = f"""请直接修订以下文章，输出修订后的完整正文。
@@ -236,6 +275,14 @@ class WriterAgent(BaseAgent):
 主题：{topic}
 
 {self._build_thesis_context(thesis)}
+
+{self._build_observation_context(observation_brief or {})}
+
+{self._build_local_voice_context(local_voice_brief or {})}
+
+{self._build_novelty_assets_context(novelty_assets or [])}
+
+{self._build_depth_questions_context(depth_questions or [])}
 
 【当前正文】
 {content}
@@ -264,8 +311,10 @@ class WriterAgent(BaseAgent):
 【修订要求】
 1. 直接输出修订后的完整文章，不要输出修改说明或辩护清单。
 2. 优先解决 Judge 标出的 failed_dimensions 和 recommendations。
-3. 继续围绕 core_claim 推进，不要改成主题综述。
-4. 保留有效的尖锐判断，同时补强机制、获益者、代价和具体例子。
+3. 优先回答 depth_questions 中 missing 或 not_deep_enough 的问题。
+4. 继续围绕 core_claim 推进，不要改成主题综述。
+5. 保留有效的尖锐判断，同时补强机制、获益者、代价和具体例子。
+6. 不得削弱 novelty_assets，不得把真实案例、结构或方案新意写成普通套话。
 """
         return prompt
 
@@ -289,6 +338,7 @@ class WriterAgent(BaseAgent):
         failed_dimensions = feedback.get("failed_dimensions", [])
         key_issues = feedback.get("key_issues", [])
         recommendations = feedback.get("recommendations", [])
+        depth_questions = feedback.get("depth_questions", [])
         pass_reason = feedback.get("pass_reason", feedback.get("reason", ""))
 
         text = "【Judge 判浅反馈】\n"
@@ -310,6 +360,17 @@ class WriterAgent(BaseAgent):
             text += "- 修改建议：\n"
             for recommendation in recommendations:
                 text += f"  - {recommendation}\n"
+        if depth_questions:
+            text += "- 必须回答的具体追问：\n"
+            for question in depth_questions:
+                if not isinstance(question, dict):
+                    continue
+                text += (
+                    f"  - [{question.get('target', '')}/"
+                    f"{question.get('status', '')}] {question.get('question', '')}\n"
+                )
+                if question.get("required_revision"):
+                    text += f"    修订要求：{question['required_revision']}\n"
         return text
 
     async def _defend(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -357,6 +418,85 @@ class WriterAgent(BaseAgent):
 - 将推翻的常识：{thesis.get("common_sense_overturned", "")}
 - 最强证据：{thesis.get("strongest_evidence", "")}
 - 最危险的反驳：{thesis.get("most_dangerous_counterargument", "")}"""
+
+    def _build_observation_context(self, observation_brief: dict) -> str:
+        """Build human observation context."""
+        if not observation_brief:
+            return "【人类观察】\n（用户未提供本地观察；不得编造本地经验。）"
+
+        details = observation_brief.get("must_preserve_details", [])
+        if isinstance(details, list):
+            details_text = "；".join(str(item) for item in details if str(item).strip())
+        else:
+            details_text = str(details)
+
+        return f"""【人类观察】
+- 反常现象：{observation_brief.get("abnormal_phenomenon", "")}
+- 案例差异：{observation_brief.get("case_difference", "")}
+- 直觉问题根源：{observation_brief.get("intuitive_root_cause", "")}
+- 具体解决方案：{observation_brief.get("concrete_solution", "")}
+- 不可丢失细节：{details_text}"""
+
+    def _build_local_voice_context(self, local_voice_brief: dict) -> str:
+        """Build local voice context."""
+        if not local_voice_brief:
+            return "【本地真实声音】\n（没有可用本地声音；不得编造引语。）"
+
+        voices = local_voice_brief.get("voices", [])
+        if not voices:
+            missing = local_voice_brief.get("missing_reason", "没有可用本地声音。")
+            return f"【本地真实声音】\n（{missing} 不得编造引语。）"
+
+        text = "【本地真实声音】\n"
+        for index, voice in enumerate(voices[:5], 1):
+            if not isinstance(voice, dict):
+                continue
+            quote = voice.get("direct_quote") or voice.get("paraphrase") or ""
+            text += (
+                f"{index}. {voice.get('speaker_type', 'unknown')} "
+                f"@{voice.get('location', '')}: {quote}\n"
+            )
+            if voice.get("pain_point"):
+                text += f"   痛点：{voice['pain_point']}\n"
+            if voice.get("local_specificity"):
+                text += f"   地方性：{voice['local_specificity']}\n"
+        return text.rstrip()
+
+    def _build_novelty_assets_context(self, novelty_assets: list) -> str:
+        """Build real novelty asset context."""
+        if not novelty_assets:
+            return "【真实新意资产】\n（Novelty Gate 尚未提供资产；写作必须主动守住 case/structure/solution 中至少一种新意。）"
+
+        text = "【真实新意资产】\n"
+        for index, asset in enumerate(novelty_assets, 1):
+            if not isinstance(asset, dict):
+                continue
+            text += (
+                f"{index}. [{asset.get('type', '')}] {asset.get('claim', '')}\n"
+                f"   不同之处：{asset.get('why_different', '')}\n"
+                f"   证据方向：{asset.get('evidence_hint', '')}\n"
+                f"   必须保留：{asset.get('must_preserve', '')}\n"
+            )
+        return text.rstrip()
+
+    def _build_depth_questions_context(self, depth_questions: list) -> str:
+        """Build concrete depth questions for rewrite."""
+        if not depth_questions:
+            return "【Depth Judge 具体追问】\n（暂无具体追问。）"
+
+        text = "【Depth Judge 具体追问】\n"
+        for index, question in enumerate(depth_questions, 1):
+            if not isinstance(question, dict):
+                continue
+            text += (
+                f"{index}. [{question.get('target', '')}/"
+                f"{question.get('status', '')}] {question.get('question', '')}\n"
+            )
+            if question.get("why_it_matters"):
+                text += f"   为什么重要：{question['why_it_matters']}\n"
+            if question.get("required_revision"):
+                text += f"   必须修订：{question['required_revision']}\n"
+        return text.rstrip()
 
     def _build_materials_context(self, materials: list) -> str:
         """构建素材上下文"""

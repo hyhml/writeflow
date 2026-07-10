@@ -105,6 +105,22 @@ def test_save_trace_writes_agent_files(tmp_path):
     result = DummyResult(content="# 最终稿\n\n正文\n")
     result.trace_events = [
         {
+            "stage": "observation_interviewer",
+            "agent": "observation_interviewer",
+            "round": None,
+            "input_summary": {},
+            "output": {"observation_brief": {"abnormal_phenomenon": "反常现象"}},
+            "created_at": "2026-07-09T09:58:00Z",
+        },
+        {
+            "stage": "local_voice_collector",
+            "agent": "local_voice_collector",
+            "round": None,
+            "input_summary": {},
+            "output": {"source_status": "not_configured", "voices": []},
+            "created_at": "2026-07-09T09:59:00Z",
+        },
+        {
             "stage": "researcher_materials",
             "agent": "researcher",
             "round": None,
@@ -125,6 +141,14 @@ def test_save_trace_writes_agent_files(tmp_path):
                 "most_dangerous_counterargument": "counterargument",
             },
             "created_at": "2026-07-09T10:00:30Z",
+        },
+        {
+            "stage": "real_novelty_gate",
+            "agent": "real_novelty_gate",
+            "round": None,
+            "input_summary": {},
+            "output": {"passed": True, "novelty_assets": [{"type": "case"}]},
+            "created_at": "2026-07-09T10:00:45Z",
         },
         {
             "stage": "writer_draft",
@@ -186,8 +210,11 @@ def test_save_trace_writes_agent_files(tmp_path):
 
     assert (trace_dir / "00_manifest.json").exists()
     assert (trace_dir / "00_timeline.md").exists()
-    assert (trace_dir / "01_researcher_materials.json").exists()
-    assert (trace_dir / "02_thesis_architect_brief.json").exists()
+    assert (trace_dir / "01_observation_interviewer.json").exists()
+    assert (trace_dir / "02_local_voice_collector.json").exists()
+    assert (trace_dir / "03_researcher_materials.json").exists()
+    assert (trace_dir / "04_thesis_architect_brief.json").exists()
+    assert (trace_dir / "05_real_novelty_gate.json").exists()
     assert (trace_dir / "round_01_writer_draft.md").exists()
     assert (trace_dir / "round_01_judge_precheck.json").exists()
     assert (trace_dir / "round_01_devil_advocate_criticisms.json").exists()

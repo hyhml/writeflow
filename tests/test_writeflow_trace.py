@@ -8,6 +8,60 @@ from writeflow import config
 from writeflow import writeflow as wf_module
 
 
+class MockObservationInterviewer:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def process(self, input_data):
+        return {
+            "missing_observation": False,
+            "observation_brief": {
+                "abnormal_phenomenon": "本地反常现象",
+                "case_difference": "具体案例差异",
+                "intuitive_root_cause": "真正问题根源",
+                "concrete_solution": "具体方案",
+                "must_preserve_details": ["不可丢失细节"],
+            },
+            "observation_questions": [],
+            "must_preserve": ["不可丢失细节"],
+            "source_status": "user_provided",
+        }
+
+
+class MockLocalVoiceCollector:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def process(self, input_data):
+        return {
+            "source_status": "from_context",
+            "voices": [
+                {
+                    "speaker_type": "通勤者",
+                    "location": "深圳",
+                    "direct_quote": "这里节点很难走。",
+                    "paraphrase": "",
+                    "pain_point": "节点拥堵",
+                    "local_specificity": "狭长地形",
+                    "source_url": "https://example.com",
+                    "confidence": 0.8,
+                }
+            ],
+            "local_voice_brief": {
+                "summary": "节点拥堵",
+                "voices": [
+                    {
+                        "speaker_type": "通勤者",
+                        "location": "深圳",
+                        "direct_quote": "这里节点很难走。",
+                        "pain_point": "节点拥堵",
+                        "local_specificity": "狭长地形",
+                    }
+                ],
+            },
+        }
+
+
 class MockResearcher:
     def __init__(self, *args, **kwargs):
         pass
@@ -27,6 +81,29 @@ class MockThesisArchitect:
             "common_sense_overturned": "overturned common sense",
             "strongest_evidence": "strongest evidence",
             "most_dangerous_counterargument": "dangerous counterargument",
+            "novelty_assets": [
+                {
+                    "type": "case",
+                    "claim": "case novelty",
+                    "why_different": "different",
+                    "evidence_hint": "evidence",
+                    "must_preserve": "detail",
+                }
+            ],
+        }
+
+
+class MockRealNoveltyGate:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def process(self, input_data):
+        return {
+            "passed": True,
+            "pass_reason": "real_novelty_present",
+            "novelty_assets": input_data["thesis"].get("novelty_assets", []),
+            "missing_reason": "",
+            "recommendations": [],
         }
 
 
@@ -61,7 +138,16 @@ class MockJudge:
         return {
             "quality_scores": {
                 name: 8 for name in wf_module.QualityScores.__dataclass_fields__.keys()
-            }
+            },
+            "depth_questions": [
+                {
+                    "target": "case",
+                    "question": "案例是否讲透？",
+                    "why_it_matters": "关系到案例新意。",
+                    "status": "answered",
+                    "required_revision": "",
+                }
+            ],
         }
 
 
@@ -97,8 +183,11 @@ def clean_settings(monkeypatch):
 
 def test_writeflow_records_agent_trace_and_cleans_final_article(monkeypatch):
     MockWriter.inputs = []
+    monkeypatch.setattr(wf_module, "ObservationInterviewerAgent", MockObservationInterviewer)
+    monkeypatch.setattr(wf_module, "LocalVoiceCollectorAgent", MockLocalVoiceCollector)
     monkeypatch.setattr(wf_module, "ResearcherAgent", MockResearcher)
     monkeypatch.setattr(wf_module, "ThesisArchitectAgent", MockThesisArchitect)
+    monkeypatch.setattr(wf_module, "RealNoveltyGateAgent", MockRealNoveltyGate)
     monkeypatch.setattr(wf_module, "WriterAgent", MockWriter)
     monkeypatch.setattr(wf_module, "DevilAdvocateAgent", MockDevilAdvocate)
     monkeypatch.setattr(wf_module, "JudgeAgent", MockJudge)
@@ -110,8 +199,11 @@ def test_writeflow_records_agent_trace_and_cleans_final_article(monkeypatch):
     agents = [event.agent for event in result.trace_events]
 
     assert stages == [
+        "observation_interviewer",
+        "local_voice_collector",
         "researcher_materials",
         "thesis_architect_brief",
+        "real_novelty_gate",
         "writer_draft",
         "judge_precheck",
         "devil_advocate_criticisms",
@@ -120,8 +212,11 @@ def test_writeflow_records_agent_trace_and_cleans_final_article(monkeypatch):
         "editor_raw",
         "final_article",
     ]
+    assert "observation_interviewer" in agents
+    assert "local_voice_collector" in agents
     assert "researcher" in agents
     assert "thesis_architect" in agents
+    assert "real_novelty_gate" in agents
     assert "writer" in agents
     assert "devil_advocate" in agents
     assert "judge" in agents
@@ -131,6 +226,8 @@ def test_writeflow_records_agent_trace_and_cleans_final_article(monkeypatch):
     assert "用户要求我" not in result.content
     assert "检测结果" not in result.content
     assert MockWriter.inputs[0]["thesis"]["core_claim"] == "core claim"
+    assert MockWriter.inputs[0]["observation_brief"]["abnormal_phenomenon"] == "本地反常现象"
+    assert MockWriter.inputs[0]["novelty_assets"][0]["claim"] == "case novelty"
     assert MockWriter.inputs[1]["mode"] == "revision"
     assert not any(input_data.get("mode") == "defense" for input_data in MockWriter.inputs)
 
@@ -175,12 +272,16 @@ def test_precheck_failure_skips_devil_and_sends_feedback_to_next_draft(monkeypat
                 scores["方案具体性"] = 5
             return {
                 "quality_scores": scores,
+                "depth_questions": [],
                 "key_issues": ["解决方案仍然像口号。"],
                 "recommendations": ["补入具体行动主体和代价承担者。"],
             }
 
+    monkeypatch.setattr(wf_module, "ObservationInterviewerAgent", MockObservationInterviewer)
+    monkeypatch.setattr(wf_module, "LocalVoiceCollectorAgent", MockLocalVoiceCollector)
     monkeypatch.setattr(wf_module, "ResearcherAgent", MockResearcher)
     monkeypatch.setattr(wf_module, "ThesisArchitectAgent", MockThesisArchitect)
+    monkeypatch.setattr(wf_module, "RealNoveltyGateAgent", MockRealNoveltyGate)
     monkeypatch.setattr(wf_module, "WriterAgent", SequencedWriter)
     monkeypatch.setattr(wf_module, "DevilAdvocateAgent", CountingDevil)
     monkeypatch.setattr(wf_module, "JudgeAgent", SequencedJudge)
@@ -191,8 +292,13 @@ def test_precheck_failure_skips_devil_and_sends_feedback_to_next_draft(monkeypat
 
     assert stages.index("judge_precheck") < stages.index("devil_advocate_criticisms")
     assert stages[:4] == [
+        "observation_interviewer",
+        "local_voice_collector",
         "researcher_materials",
         "thesis_architect_brief",
+    ]
+    assert stages[4:7] == [
+        "real_novelty_gate",
         "writer_draft",
         "judge_precheck",
     ]
@@ -213,6 +319,46 @@ async def async_write_with_two_rounds():
     return await wf.write("测试主题")
 
 
+def test_real_novelty_gate_failure_stops_before_writer(monkeypatch):
+    class FailingNoveltyGate:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def process(self, input_data):
+            return {
+                "passed": False,
+                "pass_reason": "no_real_novelty",
+                "novelty_assets": [],
+                "missing_reason": "no_real_novelty",
+                "recommendations": ["重建 case/structure/solution 资产。"],
+            }
+
+    class CountingWriter(MockWriter):
+        calls = 0
+
+        async def process(self, input_data):
+            CountingWriter.calls += 1
+            return await super().process(input_data)
+
+    monkeypatch.setattr(wf_module, "ObservationInterviewerAgent", MockObservationInterviewer)
+    monkeypatch.setattr(wf_module, "LocalVoiceCollectorAgent", MockLocalVoiceCollector)
+    monkeypatch.setattr(wf_module, "ResearcherAgent", MockResearcher)
+    monkeypatch.setattr(wf_module, "ThesisArchitectAgent", MockThesisArchitect)
+    monkeypatch.setattr(wf_module, "RealNoveltyGateAgent", FailingNoveltyGate)
+    monkeypatch.setattr(wf_module, "WriterAgent", CountingWriter)
+    monkeypatch.setattr(wf_module, "DevilAdvocateAgent", MockDevilAdvocate)
+    monkeypatch.setattr(wf_module, "JudgeAgent", MockJudge)
+    monkeypatch.setattr(wf_module, "EditorAgent", MockEditor)
+
+    result = asyncio.run(async_write_once())
+    stages = [event.stage for event in result.trace_events]
+
+    assert result.passed is False
+    assert result.pass_reason == "no_real_novelty"
+    assert "writer_draft" not in stages
+    assert CountingWriter.calls == 0
+
+
 def test_editor_is_not_called_when_final_depth_judge_fails(monkeypatch):
     class AlwaysFailJudge:
         def __init__(self, *args, **kwargs):
@@ -222,11 +368,12 @@ def test_editor_is_not_called_when_final_depth_judge_fails(monkeypatch):
             scores = {
                 name: 8 for name in wf_module.QualityScores.__dataclass_fields__.keys()
             }
-            scores["新判断"] = 5
+            scores["层次穿透"] = 5
             return {
                 "quality_scores": scores,
-                "key_issues": ["没有新判断。"],
-                "recommendations": ["重写核心判断。"],
+                "depth_questions": [],
+                "key_issues": ["层次穿透不足。"],
+                "recommendations": ["重写机制解释。"],
             }
 
     class CountingDevil:
@@ -246,8 +393,11 @@ def test_editor_is_not_called_when_final_depth_judge_fails(monkeypatch):
             CountingEditor.calls += 1
             return await super().process(input_data)
 
+    monkeypatch.setattr(wf_module, "ObservationInterviewerAgent", MockObservationInterviewer)
+    monkeypatch.setattr(wf_module, "LocalVoiceCollectorAgent", MockLocalVoiceCollector)
     monkeypatch.setattr(wf_module, "ResearcherAgent", MockResearcher)
     monkeypatch.setattr(wf_module, "ThesisArchitectAgent", MockThesisArchitect)
+    monkeypatch.setattr(wf_module, "RealNoveltyGateAgent", MockRealNoveltyGate)
     monkeypatch.setattr(wf_module, "WriterAgent", MockWriter)
     monkeypatch.setattr(wf_module, "DevilAdvocateAgent", CountingDevil)
     monkeypatch.setattr(wf_module, "JudgeAgent", AlwaysFailJudge)

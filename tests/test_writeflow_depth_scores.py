@@ -9,7 +9,6 @@ def test_writeflow_parses_new_depth_score_fields():
     scores = flow._parse_scores_from_result(
         {
             "quality_scores": {
-                "新判断": "7",
                 "概念克制": 6,
                 "句子必要性": 8,
                 "层次穿透": 6.5,
@@ -19,7 +18,6 @@ def test_writeflow_parses_new_depth_score_fields():
     )
 
     assert scores.to_dict() == {
-        "新判断": 7.0,
         "概念克制": 6.0,
         "句子必要性": 8.0,
         "层次穿透": 6.5,
@@ -45,4 +43,4 @@ def test_writeflow_ignores_old_seven_dimension_score_fields():
     )
 
     assert scores.total() == 0
-    assert set(scores.to_dict()) == {"新判断", "概念克制", "句子必要性", "层次穿透", "方案具体性"}
+    assert set(scores.to_dict()) == {"概念克制", "句子必要性", "层次穿透", "方案具体性"}

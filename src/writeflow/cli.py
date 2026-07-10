@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
 import sys
+from pathlib import Path
 
 from writeflow import __version__
 from writeflow.agents.llm_client import ModelClientError
 from writeflow.config import get_settings, validate_runtime_settings
-from writeflow.core.orchestrator import Orchestrator
+from writeflow.writeflow import WriteFlow
 
 
 def print_help() -> None:
@@ -26,6 +28,7 @@ WriteFLow - 批判性深度稿件多 Agent 生产系统
 示例:
   writeflow start
   writeflow submit "当代资本主义的结构性矛盾"
+  writeflow submit "深圳电动车治理" --observation "我看到的本地反常现象..."
   writeflow status abc123-def456
 
 更多帮助: writeflow --help
@@ -97,8 +100,14 @@ async def cmd_submit(args: list[str]) -> int:
 
     if not args:
         print("错误: 需要提供主题")
-        print("用法: writeflow submit <主题>")
+        print("用法: writeflow submit <主题> [--observation 文本] [--observation-file path.txt]")
         return 1
+
+    parser = argparse.ArgumentParser(prog="writeflow submit")
+    parser.add_argument("topic", nargs="+")
+    parser.add_argument("--observation", default="")
+    parser.add_argument("--observation-file", default="")
+    parsed = parser.parse_args(args)
 
     settings = get_settings()
     issues = validate_runtime_settings(settings)
@@ -109,30 +118,32 @@ async def cmd_submit(args: list[str]) -> int:
         print("可以先执行 `writeflow start` 查看当前配置。")
         return 1
 
-    topic = " ".join(args)
+    try:
+        human_observation = _read_observation_input(
+            parsed.observation,
+            parsed.observation_file,
+        )
+    except OSError as exc:
+        print(f"观察文件读取失败: {exc}")
+        return 1
+
+    topic = " ".join(parsed.topic)
     print(f"提交任务: {topic}")
     print(f"Provider: {settings.provider} | Model: {settings.model}")
 
-    orchestrator = Orchestrator()
-    task_id = await orchestrator.submit_task(topic)
+    wf = WriteFlow()
+    result = await wf.write(topic, context={"human_observation": human_observation})
 
-    print(f"任务已提交: {task_id}")
-    print("开始处理...")
-    result = await orchestrator.process_task(task_id)
-
-    if result["status"] == "completed":
-        print("\n任务完成!")
-        print(f"判浅评分: {result['quality_scores']}")
-        print(f"Gate 结果: {result['gate_result']['passed']}")
-        print(f"\n最终内容 ({len(result['final_content'])} 字符):")
-        print("-" * 60)
-        print(result["final_content"][:1000])
-        if len(result["final_content"]) > 1000:
-            print("... (省略)")
-        return 0
-
-    print(f"\n任务失败: {result.get('error', '未知错误')}")
-    return 1
+    print("\n任务完成!")
+    print(f"判浅评分: {result.scores.to_dict()}")
+    print(f"Gate 结果: {result.passed}")
+    print(f"原因: {result.pass_reason}")
+    print(f"\n最终内容 ({len(result.content)} 字符):")
+    print("-" * 60)
+    print(result.content[:1000])
+    if len(result.content) > 1000:
+        print("... (省略)")
+    return 0
 
 
 async def cmd_status(args: list[str]) -> int:
@@ -161,6 +172,12 @@ def cli_main() -> None:
     except Exception as exc:
         print(f"错误: {exc}")
         sys.exit(1)
+
+
+def _read_observation_input(observation: str = "", observation_file: str = "") -> str:
+    if observation_file:
+        return Path(observation_file).read_text(encoding="utf-8").strip()
+    return observation.strip()
 
 
 if __name__ == "__main__":

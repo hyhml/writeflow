@@ -207,3 +207,53 @@ Researcher -> Thesis Architect -> Writer Draft -> Judge Precheck
 ```
 
 **结论**：v0.2.7 不新增 Agent，但把 Judge 从终局评分器改成了重写压力源。主流程不再调用 Writer defense，而是让 Writer 根据 Judge 和 Devil Advocate 的反馈直接修订正文。
+
+## v0.2.8 (2026-07-10)
+
+**环境**：Windows Codex workspace, Python 3.14.6
+
+**目标**：重构上游生产方式，新增人类观察、真实声音和真实新意门槛。Observation Interviewer 整理用户本地观察，Local Voice Collector 标准化真实声音，Thesis Architect 产出候选 `novelty_assets`，Real Novelty Gate 对 case / structure / solution 三类新意做一票否决；Depth Judge 改为 4 项判浅标准，并用 `depth_questions` 追问新意是否被讲透。
+
+**验证命令**：
+```bash
+python -m compileall -q write.py src tests
+python -m pytest -q
+python -m ruff check .
+```
+
+**运行结果**：
+| 项目 | 状态 |
+|------|------|
+| 版本号 | 0.2.8 |
+| 编译检查 | ✅ 通过 |
+| pytest | ✅ 51 passed |
+| ruff | ✅ All checks passed |
+
+**新增流程**：
+```text
+Observation Interviewer
+-> Local Voice Collector
+-> Researcher
+-> Thesis Architect
+-> Real Novelty Gate
+   -> 失败：退回 Thesis Architect 重建一次；仍失败则停止
+   -> 通过：Writer Draft
+-> Depth Judge Precheck
+   -> 失败：Writer Rewrite
+   -> 通过：Devil Advocate
+-> Writer Revision
+-> Depth Judge Final
+-> Editor
+-> Final Article
+```
+
+**新增 trace 文件**：
+```text
+01_observation_interviewer.json
+02_local_voice_collector.json
+03_researcher_materials.json
+04_thesis_architect_brief.json
+05_real_novelty_gate.json
+```
+
+**结论**：v0.2.8 把“真实新意”前移到写作前。系统不再期待 AI 凭空发明本地经验；没有用户观察或搜索结果时，trace 会明确标记缺失，不编造直接言论。

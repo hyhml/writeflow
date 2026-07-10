@@ -1,4 +1,4 @@
-"""Quality gate based on five shallow-depth checks."""
+"""Quality gate based on four shallow-depth checks and concrete questions."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,11 +6,10 @@ from typing import Dict, List, Optional
 
 
 QUALITY_DIMENSIONS = {
-    "新判断": {"weight": 0.20, "min_score": 6.0},
-    "概念克制": {"weight": 0.20, "min_score": 6.0},
-    "句子必要性": {"weight": 0.20, "min_score": 6.0},
-    "层次穿透": {"weight": 0.20, "min_score": 6.0},
-    "方案具体性": {"weight": 0.20, "min_score": 6.0},
+    "概念克制": {"weight": 0.25, "min_score": 6.0},
+    "句子必要性": {"weight": 0.25, "min_score": 6.0},
+    "层次穿透": {"weight": 0.25, "min_score": 6.0},
+    "方案具体性": {"weight": 0.25, "min_score": 6.0},
 }
 
 
@@ -51,10 +50,11 @@ class GateResult:
     failed_dimensions: List[str] = field(default_factory=list)
     total_score: float = 0
     recommendations: List[str] = field(default_factory=list)
+    depth_questions: List[dict] = field(default_factory=list)
 
 
 class QualityGate:
-    """Reject shallow drafts unless all five depth dimensions pass."""
+    """Reject shallow drafts unless depth scores and questions pass."""
 
     def __init__(self, config: Optional[dict] = None):
         self.config = config or {}
@@ -66,7 +66,11 @@ class QualityGate:
             if dimension in self.dimensions:
                 self.dimensions[dimension].update(dimension_config)
 
-    def evaluate(self, scores: Dict[str, float]) -> GateResult:
+    def evaluate(
+        self,
+        scores: Dict[str, float],
+        depth_questions: Optional[List[dict]] = None,
+    ) -> GateResult:
         normalized_scores = self._normalize_scores(scores)
         quality_scores = QualityScores(scores=normalized_scores)
         total_score = quality_scores.total
@@ -74,6 +78,12 @@ class QualityGate:
             dimension
             for dimension, score in normalized_scores.items()
             if score < self.dimensions[dimension]["min_score"]
+        ]
+        normalized_questions = self._normalize_depth_questions(depth_questions or [])
+        blocking_questions = [
+            question
+            for question in normalized_questions
+            if question.get("status") in {"missing", "not_deep_enough"}
         ]
 
         if failed_dims:
@@ -88,6 +98,24 @@ class QualityGate:
                     + ", ".join(failed_dims),
                     "需要重写对应段落，而不是补术语或扩写套话。",
                 ],
+                depth_questions=normalized_questions,
+            )
+
+        if blocking_questions:
+            required_revisions = [
+                question.get("required_revision", "")
+                for question in blocking_questions
+                if question.get("required_revision")
+            ]
+            return GateResult(
+                passed=False,
+                reason="unanswered_depth_questions",
+                quality_scores=quality_scores,
+                failed_dimensions=[],
+                total_score=total_score,
+                recommendations=required_revisions
+                or ["仍有关键追问未回答或回答不够深入，需要按 depth_questions 重写。"],
+                depth_questions=normalized_questions,
             )
 
         return GateResult(
@@ -96,7 +124,8 @@ class QualityGate:
             quality_scores=quality_scores,
             failed_dimensions=[],
             total_score=total_score,
-            recommendations=["五项判浅标准均通过。"],
+            recommendations=["四项判浅标准和关键追问均通过。"],
+            depth_questions=normalized_questions,
         )
 
     def _normalize_scores(self, scores: Dict[str, float]) -> Dict[str, float]:
@@ -112,8 +141,9 @@ class QualityGate:
         self,
         scores: Dict[str, float],
         context: dict,
+        depth_questions: Optional[List[dict]] = None,
     ) -> GateResult:
-        result = self.evaluate(scores)
+        result = self.evaluate(scores, depth_questions=depth_questions)
 
         if not result.passed:
             if context.get("discussion_rounds", 0) >= 5:
@@ -126,6 +156,26 @@ class QualityGate:
                 )
 
         return result
+
+    def _normalize_depth_questions(self, questions: List[dict]) -> List[dict]:
+        normalized = []
+        valid_statuses = {"answered", "not_deep_enough", "missing"}
+        for question in questions:
+            if not isinstance(question, dict):
+                continue
+            status = str(question.get("status", "missing")).strip()
+            normalized.append(
+                {
+                    "target": str(question.get("target", "")).strip(),
+                    "question": str(question.get("question", "")).strip(),
+                    "why_it_matters": str(question.get("why_it_matters", "")).strip(),
+                    "status": status if status in valid_statuses else "missing",
+                    "required_revision": str(
+                        question.get("required_revision", "")
+                    ).strip(),
+                }
+            )
+        return [question for question in normalized if question["question"]]
 
 
 class BatchQualityAnalyzer:

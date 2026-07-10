@@ -72,7 +72,10 @@ class DummyResult:
 
 
 class DummyWriteFlow:
-    async def write(self, topic):
+    context_seen = None
+
+    async def write(self, topic, context=None):
+        DummyWriteFlow.context_seen = context
         return DummyResult()
 
 
@@ -98,3 +101,35 @@ def test_write_py_saves_article_scores_and_trace(monkeypatch, tmp_path):
     assert (trace_dir / "00_timeline.md").exists()
     assert (trace_dir / "round_01_writer_draft.md").exists()
     assert (trace_dir / "final_article.md").exists()
+
+
+def test_write_py_passes_observation_file_to_context(monkeypatch, tmp_path):
+    output_path = tmp_path / "article.md"
+    observation_file = tmp_path / "observation.txt"
+    observation_file.write_text("本地观察内容", encoding="utf-8")
+    monkeypatch.setenv("WRITEFLOW_PROVIDER", "minimax")
+    monkeypatch.setenv("MINIMAX_API_KEY", "fake-key")
+    monkeypatch.delenv("WRITEFLOW_API_KEY", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "write.py",
+            "测试主题",
+            "-o",
+            str(output_path),
+            "--observation-file",
+            str(observation_file),
+        ],
+    )
+    config.reset_settings_cache()
+    monkeypatch.setattr(config, "_dotenv_loaded", True)
+
+    module = load_write_module()
+    DummyWriteFlow.context_seen = None
+    monkeypatch.setattr(module, "WriteFlow", lambda: DummyWriteFlow())
+
+    exit_code = asyncio.run(module.main())
+
+    assert exit_code == 0
+    assert DummyWriteFlow.context_seen == {"human_observation": "本地观察内容"}
