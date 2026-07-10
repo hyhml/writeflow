@@ -75,12 +75,12 @@ class Orchestrator:
 
     流程：
     1. Researcher收集素材
-    2. Writer基于素材写作
-    3. Devil's Advocate进行二级批判
-    4. Judge进行质量评估
-    5. 根据评估结果决定：
-       - 通过 → Editor最终打磨
-       - 未通过 → Writer基于反馈修订，继续讨论循环
+    2. Thesis Architect产出核心判断
+    3. Writer写初稿
+    4. Depth Judge初检，浅稿直接退回Writer重写
+    5. 初检通过后进入Devil's Advocate质疑
+    6. Writer直接修订正文，再由Depth Judge终检
+    7. 终检通过 → Editor最终打磨
     """
 
     def __init__(
@@ -138,33 +138,76 @@ class Orchestrator:
             await self._phase_thesis(task)
 
             # Phase 2-4: 讨论循环
+            rewrite_feedback: Dict[str, Any] = {}
             for round_num in range(1, self.max_rounds + 1):
                 task.current_round = round_num
                 logger.info(f"Task {task_id}: Round {round_num}")
 
-                # 2a: Writer生成
+                # 2a: Writer生成或根据上一轮Judge反馈重写
                 logger.info(f"Task {task_id}: Round {round_num} - Writing")
-                content = await self._phase_write(task)
+                content = await self._phase_write(task, rewrite_feedback)
 
-                # 2b: Devil's Advocate质疑
+                # 2b: Depth Judge初检
+                logger.info(f"Task {task_id}: Round {round_num} - Judge precheck")
+                gate_result = await self._phase_judge(
+                    task,
+                    content,
+                    criticisms=[],
+                    phase="judge_precheck",
+                )
+                task.gate_result = gate_result
+
+                if not gate_result.passed:
+                    rewrite_feedback = self._build_rewrite_feedback(
+                        task=task,
+                        gate_result=gate_result,
+                        criticisms=[],
+                        phase="judge_precheck",
+                    )
+                    if round_num < self.max_rounds:
+                        task.iteration_count += 1
+                        continue
+                    break
+
+                # 2c: Devil's Advocate质疑
                 logger.info(f"Task {task_id}: Round {round_num} - Criticism")
                 criticisms = await self._phase_criticism(task, content)
 
-                # 2c: Writer辩护
-                logger.info(f"Task {task_id}: Round {round_num} - Defense")
-                defenses = await self._phase_defense(task, content, criticisms)
+                # 2d: Writer直接修订正文
+                logger.info(f"Task {task_id}: Round {round_num} - Revision")
+                content = await self._phase_revision(
+                    task,
+                    content,
+                    criticisms,
+                    self._build_rewrite_feedback(
+                        task=task,
+                        gate_result=gate_result,
+                        criticisms=[],
+                        phase="judge_precheck",
+                    ),
+                )
 
-                # 2d: Judge评估
-                logger.info(f"Task {task_id}: Round {round_num} - Judge")
-                gate_result = await self._phase_judge(task, content, criticisms, defenses)
+                # 2e: 修订稿终检
+                logger.info(f"Task {task_id}: Round {round_num} - Judge final")
+                gate_result = await self._phase_judge(
+                    task,
+                    content,
+                    criticisms=criticisms,
+                    phase="judge_final",
+                )
+                task.gate_result = gate_result
 
                 # 检查是否通过
                 if gate_result.passed:
                     logger.info(f"Task {task_id}: Passed at round {round_num}")
-                    task.gate_result = gate_result
                     break
 
-                # 如果未达到最轮次，继续
+                rewrite_feedback = self._build_rewrite_feedback(
+                    task=task,
+                    gate_result=gate_result,
+                    criticisms=criticisms,
+                    phase="judge_final",
+                )
                 if round_num < self.max_rounds:
                     task.iteration_count += 1
 
@@ -173,7 +216,7 @@ class Orchestrator:
                 logger.info(f"Task {task_id}: Phase 5 - Editor")
                 task.final_content = await self._phase_edit(task)
             else:
-                task.final_content = task.discussion_history[-1]["content"]
+                task.final_content = self._latest_article_content(task)
 
             task.status = "completed"
             task.updated_at = datetime.utcnow()
@@ -214,7 +257,9 @@ class Orchestrator:
         })
         return task.thesis
 
-    async def _phase_write(self, task: TaskContext) -> str:
+    async def _phase_write(
+        self, task: TaskContext, rewrite_feedback: Optional[Dict[str, Any]] = None
+    ) -> str:
         """写作阶段"""
         previous_rounds = []
         if task.discussion_history:
@@ -229,6 +274,7 @@ class Orchestrator:
             "materials": task.materials,
             "thesis": task.thesis,
             "previous_rounds": previous_rounds,
+            "rewrite_feedback": rewrite_feedback or {},
         })
 
         content = result["content"]
@@ -292,6 +338,35 @@ class Orchestrator:
 
         return criticisms
 
+    async def _phase_revision(
+        self,
+        task: TaskContext,
+        content: str,
+        criticisms: List[dict],
+        judge_feedback: Dict[str, Any],
+    ) -> str:
+        """修订阶段：直接输出新的正文，不输出辩护说明。"""
+        result = await self.agents["writer"].process({
+            "task_id": task.task_id,
+            "round": task.current_round,
+            "mode": "revision",
+            "topic": task.topic,
+            "materials": task.materials,
+            "thesis": task.thesis,
+            "content": content,
+            "criticisms": criticisms,
+            "judge_feedback": judge_feedback,
+        })
+
+        revised_content = result["content"]
+        task.discussion_history.append({
+            "round": task.current_round,
+            "phase": "revision",
+            "content": revised_content,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        return revised_content
+
     async def _phase_defense(
         self,
         task: TaskContext,
@@ -327,7 +402,8 @@ class Orchestrator:
         task: TaskContext,
         content: str,
         criticisms: List[dict],
-        defenses: str
+        phase: str,
+        defenses: str = "",
     ) -> GateResult:
         """评估阶段"""
         result = await self.agents["judge"].process({
@@ -365,12 +441,14 @@ class Orchestrator:
         # 记录
         task.discussion_history.append({
             "round": task.current_round,
-            "phase": "judge",
+            "phase": phase,
             "quality_scores": scores,
             "gate_result": {
                 "passed": gate_result.passed,
                 "reason": gate_result.reason,
             },
+            "failed_dimensions": gate_result.failed_dimensions,
+            "recommendations": gate_result.recommendations,
             "timestamp": datetime.utcnow().isoformat(),
         })
 
@@ -378,11 +456,7 @@ class Orchestrator:
 
     async def _phase_edit(self, task: TaskContext) -> str:
         """编辑阶段"""
-        last_content = ""
-        for h in reversed(task.discussion_history):
-            if h.get("phase") == "write":
-                last_content = h.get("content", "")
-                break
+        last_content = self._latest_article_content(task)
 
         result = await self.agents["editor"].process({
             "task_id": task.task_id,
@@ -394,9 +468,46 @@ class Orchestrator:
             "criticisms": [
                 c.to_dict() for c in task.debate_graph.get_unresolved_criticisms()
             ],
+            "thesis": task.thesis,
         })
 
         return result["content"]
+
+    def _latest_article_content(self, task: TaskContext) -> str:
+        """Return the latest Writer-produced article body."""
+        for history in reversed(task.discussion_history):
+            if history.get("phase") in {"revision", "write"}:
+                return history.get("content", "")
+        return ""
+
+    def _build_rewrite_feedback(
+        self,
+        *,
+        task: TaskContext,
+        gate_result: GateResult,
+        criticisms: List[dict],
+        phase: str,
+    ) -> Dict[str, Any]:
+        """Build compact Judge feedback for Writer rewrite/revision."""
+        latest_judge = next(
+            (
+                history
+                for history in reversed(task.discussion_history)
+                if history.get("phase") == phase
+            ),
+            {},
+        )
+        return {
+            "phase": phase,
+            "passed": gate_result.passed,
+            "pass_reason": gate_result.reason,
+            "quality_scores": task.quality_scores,
+            "failed_dimensions": gate_result.failed_dimensions,
+            "key_issues": latest_judge.get("key_issues", []),
+            "recommendations": gate_result.recommendations
+            or latest_judge.get("recommendations", []),
+            "criticisms": criticisms,
+        }
 
     def _build_result(self, task: TaskContext) -> dict:
         """构建结果"""

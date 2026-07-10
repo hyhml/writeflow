@@ -12,12 +12,15 @@ EDITOR_SYSTEM_PROMPT = """你是一位批判性文章的编辑，你的职责不
 2. 删除了所有自我保护的妥协
 3. 强化了机制、获益者、代价和具体证据
 4. 弱化了可能分散注意力的边缘内容
+5. 只做表达清理、结构顺滑和冗余删除，不重写文章立场
 
 【编辑原则】
 - 砍掉所有"虽然有争议但..."类型的废话
 - 将模糊的"有人认为"改为明确的"XX理论/利益集团/意识形态"
 - 删除无法支撑论点的华丽修辞
 - 强化那些让你的编辑心跳加速的"危险段落"
+- 不得削弱 Thesis Architect 的 core_claim
+- 不得把尖锐判断改成折中综述
 
 【锋利度检测】
 检查以下软化信号并修正：
@@ -62,9 +65,10 @@ class EditorAgent(BaseAgent):
         quality_scores = input_data.get("quality_scores", {})
         key_issues = input_data.get("key_issues", [])
         criticisms = input_data.get("criticisms", [])
+        thesis = input_data.get("thesis", {})
 
         edit_prompt = self._build_edit_prompt(
-            content, quality_scores, key_issues, criticisms
+            content, quality_scores, key_issues, criticisms, thesis
         )
 
         messages = [{"role": "user", "content": edit_prompt}]
@@ -87,13 +91,17 @@ class EditorAgent(BaseAgent):
         content: str,
         quality_scores: Dict[str, float],
         key_issues: list,
-        criticisms: list
+        criticisms: list,
+        thesis: dict | None = None,
     ) -> str:
         """构建编辑提示"""
         prompt = f"""请对以下批判性文章进行最终编辑打磨：
 
 【当前版本】
 {content}
+
+【不可削弱的核心判断】
+{(thesis or {}).get("core_claim", "")}
 
 【判浅评分】
 """
@@ -112,10 +120,11 @@ class EditorAgent(BaseAgent):
 
         prompt += """
 【编辑要求】
-1. 保持文章的核心判断，不要稀释
-2. 删除所有自我保护的妥协表述
-3. 强化机制、获益者、代价和具体证据
-4. 使文章更加精准、有力
+1. 只做表达清理、结构顺滑和冗余删除
+2. 保持文章的核心判断，不要稀释
+3. 不得把尖锐判断改成折中综述
+4. 删除所有自我保护的妥协表述
+5. 强化机制、获益者、代价和具体证据
 
 直接输出编辑后的文章全文。"""
 

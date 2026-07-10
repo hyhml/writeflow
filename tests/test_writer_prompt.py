@@ -45,3 +45,25 @@ def test_writer_prompt_rejects_shallow_topic_survey():
     assert "禁止写成“主题综述式”文章" in prompt
     assert "不要为了显得全面而铺开多个浅层段落" in prompt
     assert "宁可少写层面" in prompt
+
+
+def test_writer_revision_prompt_outputs_article_not_defense():
+    agent = WriterAgent.__new__(WriterAgent)
+
+    prompt = agent._build_revision_prompt(
+        topic="测试主题",
+        content="# 初稿\n\n正文。",
+        thesis={"core_claim": "核心判断"},
+        materials=[],
+        judge_feedback={
+            "failed_dimensions": ["层次穿透"],
+            "recommendations": ["补强机制和代价承担者。"],
+        },
+        criticisms=[{"question": "缺少具体例子。"}],
+    )
+
+    assert "直接修订" in prompt
+    assert "直接输出修订后的完整文章" in prompt
+    assert "不要输出修改说明或辩护清单" in prompt
+    assert "层次穿透" in prompt
+    assert "缺少具体例子" in prompt

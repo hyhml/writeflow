@@ -135,6 +135,17 @@ def test_save_trace_writes_agent_files(tmp_path):
             "created_at": "2026-07-09T10:01:00Z",
         },
         {
+            "stage": "judge_precheck",
+            "agent": "judge",
+            "round": 1,
+            "input_summary": {},
+            "output": {
+                "gate_result": {"passed": True},
+                "decision": "Depth precheck passed; sent to Devil Advocate",
+            },
+            "created_at": "2026-07-09T10:01:30Z",
+        },
+        {
             "stage": "devil_advocate_criticisms",
             "agent": "devil_advocate",
             "round": 1,
@@ -143,19 +154,22 @@ def test_save_trace_writes_agent_files(tmp_path):
             "created_at": "2026-07-09T10:02:00Z",
         },
         {
-            "stage": "writer_defense",
+            "stage": "writer_revision",
             "agent": "writer",
             "round": 1,
             "input_summary": {},
-            "output": {"content": "辩护"},
+            "output": {"content": "# 修订稿\n"},
             "created_at": "2026-07-09T10:03:00Z",
         },
         {
-            "stage": "judge_result",
+            "stage": "judge_final",
             "agent": "judge",
             "round": 1,
             "input_summary": {},
-            "output": {"gate_result": {"passed": True}},
+            "output": {
+                "gate_result": {"passed": True},
+                "decision": "Depth final passed; sent to Editor",
+            },
             "created_at": "2026-07-09T10:04:00Z",
         },
         {
@@ -175,8 +189,11 @@ def test_save_trace_writes_agent_files(tmp_path):
     assert (trace_dir / "01_researcher_materials.json").exists()
     assert (trace_dir / "02_thesis_architect_brief.json").exists()
     assert (trace_dir / "round_01_writer_draft.md").exists()
+    assert (trace_dir / "round_01_judge_precheck.json").exists()
     assert (trace_dir / "round_01_devil_advocate_criticisms.json").exists()
-    assert (trace_dir / "round_01_writer_defense.md").exists()
-    assert (trace_dir / "round_01_judge_result.json").exists()
+    assert (trace_dir / "round_01_writer_revision.md").exists()
+    assert (trace_dir / "round_01_judge_final.json").exists()
     assert (trace_dir / "final_editor_raw.md").exists()
     assert (trace_dir / "final_article.md").read_text(encoding="utf-8") == "# 最终稿\n\n正文\n"
+    timeline = (trace_dir / "00_timeline.md").read_text(encoding="utf-8")
+    assert "Depth precheck passed; sent to Devil Advocate" in timeline

@@ -225,13 +225,22 @@ class WriteFlow:
         content = ""
         current_scores = QualityScores()
         gate_result: Optional[GateResult] = None
+        rewrite_feedback: Dict[str, Any] = {}
+        completed_rounds = 0
 
         for round_num in range(1, max_rounds + 1):
+            completed_rounds = round_num
             logger.info(f"Task {task_id}: Round {round_num}")
 
-            # 2a: Writer生成
+            # 2a: Writer生成或根据上一轮判浅反馈重写
             content = await self._write_content(
-                task_id, topic, materials, thesis, round_num, content
+                task_id,
+                topic,
+                materials,
+                thesis,
+                round_num,
+                content,
+                rewrite_feedback,
             )
             self._record_trace(
                 trace_events,
@@ -246,7 +255,49 @@ class WriteFlow:
                 output={"content": content},
             )
 
-            # 2b: Devil's Advocate质疑
+            # 2b: Depth Judge初检。浅稿先退回Writer，不进入Devil Advocate。
+            gate_result, judge_output = await self._judge_content(
+                task_id,
+                topic,
+                content,
+                criticisms=[],
+                materials=materials,
+            )
+            current_scores = self._parse_scores(gate_result)
+            precheck_output = {
+                "agent_result": judge_output,
+                "gate_result": self._gate_result_to_dict(gate_result),
+            }
+
+            if gate_result.passed:
+                precheck_output["decision"] = "Depth precheck passed; sent to Devil Advocate"
+            else:
+                precheck_output["decision"] = "Judge failed, sent back to Writer"
+
+            self._record_trace(
+                trace_events,
+                stage="judge_precheck",
+                agent="judge",
+                round_number=round_num,
+                input_summary={
+                    "content_chars": len(content),
+                    "criticisms_count": 0,
+                },
+                output=precheck_output,
+            )
+
+            if not gate_result.passed:
+                rewrite_feedback = self._build_rewrite_feedback(
+                    gate_result=gate_result,
+                    judge_output=judge_output,
+                    criticisms=[],
+                    phase="judge_precheck",
+                )
+                if round_num < max_rounds:
+                    continue
+                break
+
+            # 2c: Devil's Advocate质疑
             criticisms = await self._criticize(
                 task_id, topic, content, materials, round_num, debate_graph
             )
@@ -262,37 +313,61 @@ class WriteFlow:
                 output={"criticisms": criticisms},
             )
 
-            # 2c: Writer辩护
-            defenses = await self._defend(
-                task_id, content, criticisms, round_num
+            # 2d: Writer直接修订正文，而不是输出辩护说明
+            source_content = content
+            content = await self._revise_content(
+                task_id,
+                topic,
+                materials,
+                thesis,
+                round_num,
+                source_content,
+                self._build_rewrite_feedback(
+                    gate_result=gate_result,
+                    judge_output=judge_output,
+                    criticisms=[],
+                    phase="judge_precheck",
+                ),
+                criticisms,
             )
             self._record_trace(
                 trace_events,
-                stage="writer_defense",
+                stage="writer_revision",
                 agent="writer",
                 round_number=round_num,
-                input_summary={"criticisms_count": len(criticisms)},
-                output={"content": defenses},
+                input_summary={
+                    "source_content_chars": len(source_content),
+                    "criticisms_count": len(criticisms),
+                },
+                output={"content": content},
             )
 
-            # 2d: Judge评估
-            gate_result, judge_output = await self._judge(
-                task_id, topic, content, criticisms, defenses, materials
+            # 2e: 修订稿再次判浅，通过后才进入Editor
+            gate_result, judge_output = await self._judge_content(
+                task_id,
+                topic,
+                content,
+                criticisms=criticisms,
+                materials=materials,
             )
             current_scores = self._parse_scores(gate_result)
             self._record_trace(
                 trace_events,
-                stage="judge_result",
+                stage="judge_final",
                 agent="judge",
                 round_number=round_num,
                 input_summary={
                     "content_chars": len(content),
                     "criticisms_count": len(criticisms),
-                    "defense_chars": len(defenses),
                 },
                 output={
                     "agent_result": judge_output,
                     "gate_result": self._gate_result_to_dict(gate_result),
+                    "decision": (
+                        "Depth final passed; sent to Editor"
+                        if gate_result.passed
+                        else "Judge failed, sent back to Writer"
+                    ),
                 },
             )
 
@@ -301,16 +376,17 @@ class WriteFlow:
                 logger.info(f"Task {task_id}: Passed at round {round_num}")
                 break
 
-            # 检查收敛
-            is_converged, _ = debate_graph.check_convergence()
-            if is_converged and round_num >= self.min_rounds:
-                logger.info(f"Task {task_id}: Converged at round {round_num}")
-                break
+            rewrite_feedback = self._build_rewrite_feedback(
+                gate_result=gate_result,
+                judge_output=judge_output,
+                criticisms=criticisms,
+                phase="judge_final",
+            )
 
         # Phase N+1: Editor打磨
         if gate_result and gate_result.passed:
             editor_raw, content = await self._edit_content(
-                task_id, content, current_scores
+                task_id, content, current_scores, thesis
             )
             self._record_trace(
                 trace_events,
@@ -335,7 +411,7 @@ class WriteFlow:
             resolved_criticisms=debate_graph.resolved_count,
             active_criticisms=debate_graph.active_count,
             key_issues=gate_result.recommendations if gate_result else [],
-            rounds=min(max_rounds, len(debate_graph.turns) + 1) if debate_graph.turns else 1,
+            rounds=completed_rounds,
         )
 
         return WriteResult(
@@ -344,7 +420,7 @@ class WriteFlow:
             passed=gate_result.passed if gate_result else False,
             pass_reason=gate_result.reason if gate_result else "unknown",
             debate_summary=debate_summary,
-            rounds=len(debate_graph.turns) if debate_graph.turns else 0,
+            rounds=completed_rounds,
             task_id=task_id,
             trace_events=trace_events,
         )
@@ -433,8 +509,17 @@ class WriteFlow:
         thesis: Dict[str, Any],
         round_num: int,
         previous_content: str,
+        rewrite_feedback: Optional[Dict[str, Any]] = None,
     ) -> str:
         """写作阶段"""
+        previous_rounds = []
+        if previous_content or rewrite_feedback:
+            previous_rounds.append({
+                "round": round_num - 1,
+                "writer_output": previous_content,
+                "judge_feedback": rewrite_feedback or {},
+            })
+
         result = await self.agents["writer"].process({
             "task_id": task_id,
             "round": round_num,
@@ -442,9 +527,35 @@ class WriteFlow:
             "topic": topic,
             "materials": materials,
             "thesis": thesis,
-            "previous_rounds": [],
+            "previous_rounds": previous_rounds,
+            "rewrite_feedback": rewrite_feedback or {},
         })
         return result.get("content", "")
+
+    async def _revise_content(
+        self,
+        task_id: str,
+        topic: str,
+        materials: List[Dict],
+        thesis: Dict[str, Any],
+        round_num: int,
+        content: str,
+        judge_feedback: Dict[str, Any],
+        criticisms: List[Dict],
+    ) -> str:
+        """根据Judge和Devil Advocate反馈直接修订正文。"""
+        result = await self.agents["writer"].process({
+            "task_id": task_id,
+            "round": round_num,
+            "mode": "revision",
+            "topic": topic,
+            "materials": materials,
+            "thesis": thesis,
+            "content": content,
+            "judge_feedback": judge_feedback,
+            "criticisms": criticisms,
+        })
+        return result.get("content", content)
 
     async def _criticize(
         self,
@@ -525,6 +636,26 @@ class WriteFlow:
         materials: List[Dict],
     ) -> tuple[GateResult, Dict[str, Any]]:
         """评估阶段"""
+        return await self._judge_content(
+            task_id,
+            topic,
+            content,
+            criticisms=criticisms,
+            materials=materials,
+            defenses=defenses,
+        )
+
+    async def _judge_content(
+        self,
+        task_id: str,
+        topic: str,
+        content: str,
+        *,
+        criticisms: List[Dict],
+        materials: List[Dict],
+        defenses: str = "",
+    ) -> tuple[GateResult, Dict[str, Any]]:
+        """统一执行Depth Judge和Quality Gate。"""
         result = await self.agents["judge"].process({
             "task_id": task_id,
             "content": content,
@@ -542,6 +673,7 @@ class WriteFlow:
         task_id: str,
         content: str,
         scores: QualityScores,
+        thesis: Optional[Dict[str, Any]] = None,
     ) -> tuple[str, str]:
         """编辑阶段"""
         result = await self.agents["editor"].process({
@@ -550,6 +682,7 @@ class WriteFlow:
             "quality_scores": scores.to_dict(),
             "key_issues": scores.failed_dimensions(6.0),
             "criticisms": [],
+            "thesis": thesis or {},
         })
         raw_content = result.get("content", content)
         return raw_content, clean_final_article(raw_content)
@@ -583,6 +716,27 @@ class WriteFlow:
             "failed_dimensions": gate_result.failed_dimensions,
             "total_score": gate_result.total_score,
             "recommendations": gate_result.recommendations,
+        }
+
+    def _build_rewrite_feedback(
+        self,
+        *,
+        gate_result: GateResult,
+        judge_output: Dict[str, Any],
+        criticisms: List[Dict],
+        phase: str,
+    ) -> Dict[str, Any]:
+        """Build compact feedback for the next Writer rewrite/revision."""
+        return {
+            "phase": phase,
+            "passed": gate_result.passed,
+            "pass_reason": gate_result.reason,
+            "quality_scores": gate_result.quality_scores.scores,
+            "failed_dimensions": gate_result.failed_dimensions,
+            "key_issues": judge_output.get("key_issues", []),
+            "recommendations": gate_result.recommendations
+            or judge_output.get("recommendations", []),
+            "criticisms": criticisms,
         }
 
     def _parse_scores(self, gate_result: GateResult) -> QualityScores:

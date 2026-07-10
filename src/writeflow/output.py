@@ -239,7 +239,13 @@ def save_trace(
         round_number = event.get("round")
         timestamp = event.get("created_at", "")
         suffix = f" round {round_number}" if round_number is not None else ""
-        timeline_lines.append(f"{index}. `{stage}` by `{agent}`{suffix} - {timestamp}")
+        decision = ""
+        output = event.get("output") or {}
+        if isinstance(output, dict) and output.get("decision"):
+            decision = f" - {output['decision']}"
+        timeline_lines.append(
+            f"{index}. `{stage}` by `{agent}`{suffix} - {timestamp}{decision}"
+        )
     (trace_path / "00_timeline.md").write_text(
         "\n".join(timeline_lines).rstrip() + "\n",
         encoding="utf-8",
@@ -274,6 +280,15 @@ def _write_trace_event(trace_path: Path, event: dict[str, Any]) -> None:
             trace_path / f"round_{round_number:02d}_devil_advocate_criticisms.json",
             output,
         )
+    elif stage == "writer_revision":
+        _write_markdown(
+            trace_path / f"round_{round_number:02d}_writer_revision.md",
+            output.get("content", ""),
+        )
+    elif stage == "judge_precheck":
+        _write_json(trace_path / f"round_{round_number:02d}_judge_precheck.json", output)
+    elif stage == "judge_final":
+        _write_json(trace_path / f"round_{round_number:02d}_judge_final.json", output)
     elif stage == "writer_defense":
         _write_markdown(
             trace_path / f"round_{round_number:02d}_writer_defense.md",

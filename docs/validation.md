@@ -177,3 +177,33 @@ python -m ruff check .
 | ruff | ✅ All checks passed |
 
 **结论**：v0.2.6 不新增 Agent，直接替换原 Judge 和 Quality Gate。任一判浅维度低于 6 分都会失败，不再因为总分高、术语多或个别维度高分而放行。
+
+## v0.2.7 (2026-07-10)
+
+**环境**：Windows Codex workspace, Python 3.14.6
+
+**目标**：调整多 Agent 工作流顺序，让 Depth Judge 驱动重写。Writer 初稿先经过 Judge 初检，浅稿退回重写；通过初检后才进入 Devil Advocate；Writer 修订后再由 Judge 终检，通过后才进入 Editor。
+
+**验证命令**：
+```bash
+python -m compileall -q write.py src tests
+python -m pytest -q
+python -m ruff check .
+```
+
+**运行结果**：
+| 项目 | 状态 |
+|------|------|
+| 版本号 | 0.2.7 |
+| 编译检查 | ✅ 通过 |
+| pytest | ✅ 40 passed |
+| ruff | ✅ All checks passed |
+
+**新增流程**：
+```text
+Researcher -> Thesis Architect -> Writer Draft -> Judge Precheck
+  -> 浅稿：Writer Rewrite
+  -> 通过：Devil Advocate -> Writer Revision -> Judge Final -> Editor
+```
+
+**结论**：v0.2.7 不新增 Agent，但把 Judge 从终局评分器改成了重写压力源。主流程不再调用 Writer defense，而是让 Writer 根据 Judge 和 Devil Advocate 的反馈直接修订正文。
