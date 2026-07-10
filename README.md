@@ -72,11 +72,12 @@ python3 write.py "深圳电动车治理" -o --observation-file observation.txt
 显示实时进度：
 
 ```bash
+python3 write.py "中考分流" -o
 python3 write.py "中考分流" -o --live
 python3 write.py "深圳电动车治理" -o --observation-file observation.txt --live
 ```
 
-这会在 `outputs/` 下生成 `.md` 稿件和对应的 `_scores.json` 判浅记录。
+使用 `-o` 保存时会默认显示进度，并在 `outputs/` 下生成 `.md` 稿件、对应的 `_scores.json` 判浅记录和进度状态文件。
 
 从 v0.2.3 开始，使用 `-o` 保存时还会生成同名 `_trace/` 文件夹，用来查看每个 Agent 的工作过程：
 
@@ -100,7 +101,7 @@ outputs/主题_时间_status.jsonl
 
 从 v0.2.8 开始，流程前移到人的观察和真实声音：Observation Interviewer 整理用户本地观察；Local Voice Collector 标准化搜索或外部输入的真实声音；Thesis Architect 生成候选 `novelty_assets`；Real Novelty Gate 只认 case、structure、solution 三类真实新意，缺失时会退回 Thesis Architect 重建一次，仍失败则不进入 Writer。
 
-从 v0.2.9 开始，`--live` 会在终端实时显示每个 Agent 的进度，并在使用 `-o` 时保存 `_status.json` 和 `_status.jsonl`。Novelty Gate 第一次失败、退回 Thesis Architect、第二次失败停止等状态都会显示出来；retry trace 也会保存为独立文件，不再覆盖初次结果。
+从 v0.2.9 开始，`--live` 会在终端实时显示每个 Agent 的进度，并在使用 `-o` 时保存 `_status.json` 和 `_status.jsonl`。v0.2.10 开始，`-o` 会默认开启进度显示和状态文件。Novelty Gate 第一次失败、退回 Thesis Architect、第二次失败停止等状态都会显示出来；retry trace 也会保存为独立文件，不再覆盖初次结果。
 
 ## 开发与测试
 
@@ -201,7 +202,7 @@ git push
 - `WriteFlow.write(topic, context={"human_observation": "...", "search_results": [...]})`
 - `WriteFlow.write(..., progress_callback=callback)` 实时接收 Agent 进度事件
 - `--observation` / `--observation-file` 输入人的本地观察
-- `--live` 显示终端进度；配合 `-o` 保存 `_status.json` / `_status.jsonl`
+- `-o` 默认显示终端进度并保存 `_status.json` / `_status.jsonl`；`--live` 可在不保存文件时显式显示进度
 - Writer 围绕 `core_claim` 主轴推进，避免主题综述式浅层覆盖
 - Real Novelty Gate 对 case / structure / solution 三类真实新意做一票否决
 - Judge 驱动的多轮重写与质疑流程

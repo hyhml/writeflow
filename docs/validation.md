@@ -300,3 +300,24 @@ outputs/<主题>_<时间>_status.jsonl
 ```
 
 **结论**：v0.2.9 让长流程运行状态可见，也让 Novelty Gate 退回过程可追踪。第一次失败原因、退回后的 Thesis 和第二次 Gate 结果都会分别保存。
+
+## v0.2.10 (2026-07-10)
+
+**目标**：修复用户运行 `python3 write.py "主题" -o` 时仍看不到进度的问题。`-o` 现在默认开启 live progress，并保存 `_status.json` / `_status.jsonl`；`--live` 仍可用于不保存文件时显式显示进度。
+
+**验证命令**：
+```bash
+python -m compileall -q write.py src tests
+python -m pytest -q
+python -m ruff check .
+```
+
+**运行结果**：
+| 项目 | 状态 |
+|------|------|
+| 版本号 | 0.2.10 |
+| 编译检查 | ✅ 通过 |
+| pytest | ✅ 57 passed |
+| ruff | ✅ All checks passed |
+
+**结论**：`python3 write.py "中考分流" -o` 不再需要额外加 `--live`，即可打印进度并写入状态文件。

@@ -93,7 +93,7 @@ class DummyWriteFlow:
         return DummyResult()
 
 
-def test_write_py_saves_article_scores_and_trace(monkeypatch, tmp_path):
+def test_write_py_saves_article_scores_trace_and_status_with_output(monkeypatch, tmp_path, capsys):
     output_path = tmp_path / "article.md"
     monkeypatch.setenv("WRITEFLOW_PROVIDER", "minimax")
     monkeypatch.setenv("MINIMAX_API_KEY", "fake-key")
@@ -106,10 +106,14 @@ def test_write_py_saves_article_scores_and_trace(monkeypatch, tmp_path):
     monkeypatch.setattr(module, "WriteFlow", lambda: DummyWriteFlow())
 
     exit_code = asyncio.run(module.main())
+    output = capsys.readouterr().out
 
     assert exit_code == 0
+    assert "Researcher" in output
     assert output_path.read_text(encoding="utf-8") == "# 最终稿\n\n正文\n"
     assert (tmp_path / "article_scores.json").exists()
+    assert (tmp_path / "article_status.json").exists()
+    assert (tmp_path / "article_status.jsonl").exists()
     trace_dir = tmp_path / "article_trace"
     assert (trace_dir / "00_manifest.json").exists()
     assert (trace_dir / "00_timeline.md").exists()

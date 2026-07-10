@@ -87,7 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--live",
         action="store_true",
-        help="显示实时 Agent 进度；与 -o 一起使用时保存 _status.json 和 _status.jsonl",
+        help="显示实时 Agent 进度；使用 -o 时会默认开启并保存 _status.json 和 _status.jsonl",
     )
     return parser
 
@@ -141,8 +141,9 @@ async def main() -> int:
     print(f"Provider: {settings.provider} | Model: {settings.model}")
     if article_path:
         print(f"输出文件: {article_path}")
+    live_enabled = args.live or bool(article_path)
     progress_reporter = None
-    if args.live:
+    if live_enabled:
         progress_reporter = ProgressReporter(
             live=True,
             status_path=status_path if article_path else None,
@@ -199,7 +200,7 @@ async def main() -> int:
         print(f"\n稿件已保存到: {saved_article}")
         print(f"评分已保存到: {saved_scores}")
         print(f"Agent 过程已保存到: {saved_trace}")
-        if args.live and status_path and status_log_path:
+        if live_enabled and status_path and status_log_path:
             print(f"进度状态已保存到: {status_path}")
             print(f"进度日志已保存到: {status_log_path}")
 
