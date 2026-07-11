@@ -49,7 +49,7 @@ class QualityScores:
         """获取达到阈值的维度"""
         return [k for k, v in self.__dict__.items() if v >= threshold]
 
-    def failed_dimensions(self, threshold: float = 6.0) -> List[str]:
+    def failed_dimensions(self, threshold: float = 5.0) -> List[str]:
         """获取未达标的维度"""
         return [k for k, v in self.__dict__.items() if v < threshold]
 
@@ -102,6 +102,14 @@ class TraceEvent:
             "attempt": self.attempt,
             "created_at": self.created_at,
         }
+
+
+class TraceEventBuffer(list):
+    """Trace list with an optional sync callback for live observers."""
+
+    def __init__(self, trace_callback: Optional[Callable[[TraceEvent], Any]] = None):
+        super().__init__()
+        self.trace_callback = trace_callback
 
 
 @dataclass
@@ -189,6 +197,7 @@ class WriteFlow:
         max_rounds: Optional[int] = None,
         context: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable[[ProgressEvent], Any]] = None,
+        trace_callback: Optional[Callable[[TraceEvent], Any]] = None,
     ) -> WriteResult:
         """
         执行一次完整写作任务
@@ -198,13 +207,14 @@ class WriteFlow:
             max_rounds: 最大讨论轮次（覆盖默认值）
             context: 额外上下文
             progress_callback: 可选进度回调，每个阶段开始/结束/失败时调用
+            trace_callback: 可选同步回调，每个 Agent 输出 trace 时调用
 
         Returns:
             WriteResult: 包含content, scores, passed, debate_summary
         """
         max_rounds = max_rounds or self.max_rounds
         task_id = str(uuid.uuid4())
-        trace_events: List[TraceEvent] = []
+        trace_events: List[TraceEvent] = TraceEventBuffer(trace_callback)
 
         logger.info(f"Task {task_id}: Starting write for topic: {topic}")
 
@@ -1166,7 +1176,7 @@ class WriteFlow:
             "task_id": task_id,
             "content": content,
             "quality_scores": scores.to_dict(),
-            "key_issues": scores.failed_dimensions(6.0),
+            "key_issues": scores.failed_dimensions(5.0),
             "criticisms": [],
             "thesis": thesis or {},
         })
@@ -1184,16 +1194,18 @@ class WriteFlow:
         input_summary: Optional[Dict[str, Any]] = None,
         output: Any = None,
     ) -> None:
-        trace_events.append(
-            TraceEvent(
-                stage=stage,
-                agent=agent,
-                round_number=round_number,
-                attempt=attempt,
-                input_summary=input_summary or {},
-                output=output or {},
-            )
+        event = TraceEvent(
+            stage=stage,
+            agent=agent,
+            round_number=round_number,
+            attempt=attempt,
+            input_summary=input_summary or {},
+            output=output or {},
         )
+        trace_events.append(event)
+        trace_callback = getattr(trace_events, "trace_callback", None)
+        if trace_callback is not None:
+            trace_callback(event)
 
     async def _emit_progress(
         self,

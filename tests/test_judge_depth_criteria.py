@@ -74,7 +74,7 @@ def test_judge_parser_rejects_shallow_dimension():
         "概念克制": 8,
         "句子必要性": 8,
         "层次穿透": 8,
-        "方案具体性": 5
+        "方案具体性": 4.9
       }
     }
     """
@@ -113,3 +113,32 @@ def test_judge_parser_rejects_unanswered_depth_question():
     assert result["passed"] is False
     assert result["pass_reason"] == "unanswered_depth_questions"
     assert "补充执行阻力" in result["recommendations"][0]
+
+
+def test_judge_parser_allows_not_deep_enough_depth_question():
+    agent = JudgeAgent.__new__(JudgeAgent)
+    raw = """
+    {
+      "quality_scores": {
+        "概念克制": 5,
+        "句子必要性": 5,
+        "层次穿透": 5,
+        "方案具体性": 5
+      },
+      "depth_questions": [
+        {
+          "target": "solution",
+          "question": "划转车道的执行阻力讲了吗？",
+          "why_it_matters": "关系到方案是否只是口号。",
+          "status": "not_deep_enough",
+          "required_revision": "补充执行阻力和代价承担者。"
+        }
+      ]
+    }
+    """
+
+    result = agent._parse_evaluation(raw)
+
+    assert result["passed"] is True
+    assert result["pass_reason"] == "depth_passed"
+    assert result["depth_questions"][0]["status"] == "not_deep_enough"

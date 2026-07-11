@@ -5,11 +5,14 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 
+DEFAULT_MIN_SCORE = 5.0
+
+
 QUALITY_DIMENSIONS = {
-    "概念克制": {"weight": 0.25, "min_score": 6.0},
-    "句子必要性": {"weight": 0.25, "min_score": 6.0},
-    "层次穿透": {"weight": 0.25, "min_score": 6.0},
-    "方案具体性": {"weight": 0.25, "min_score": 6.0},
+    "概念克制": {"weight": 0.25, "min_score": DEFAULT_MIN_SCORE},
+    "句子必要性": {"weight": 0.25, "min_score": DEFAULT_MIN_SCORE},
+    "层次穿透": {"weight": 0.25, "min_score": DEFAULT_MIN_SCORE},
+    "方案具体性": {"weight": 0.25, "min_score": DEFAULT_MIN_SCORE},
 }
 
 
@@ -27,14 +30,14 @@ class QualityScores:
     def average(self) -> float:
         return self.total / len(self.scores) if self.scores else 0
 
-    def failed_dimensions(self, threshold: float = 6.0) -> List[str]:
+    def failed_dimensions(self, threshold: float = DEFAULT_MIN_SCORE) -> List[str]:
         return [key for key, value in self.scores.items() if value < threshold]
 
     def excellent_dimensions(self, threshold: float = 8.0) -> List[str]:
         # Kept for output compatibility; no longer used as a pass condition.
         return [key for key, value in self.scores.items() if value >= threshold]
 
-    def is_all_developed(self, threshold: float = 6.0) -> bool:
+    def is_all_developed(self, threshold: float = DEFAULT_MIN_SCORE) -> bool:
         # Kept for compatibility with older callers.
         return all(value >= threshold for value in self.scores.values())
 
@@ -83,7 +86,7 @@ class QualityGate:
         blocking_questions = [
             question
             for question in normalized_questions
-            if question.get("status") in {"missing", "not_deep_enough"}
+            if question.get("status") == "missing"
         ]
 
         if failed_dims:
@@ -94,7 +97,7 @@ class QualityGate:
                 failed_dimensions=failed_dims,
                 total_score=total_score,
                 recommendations=[
-                    "以下判浅维度未达到 6 分："
+                    f"以下判浅维度未达到 {DEFAULT_MIN_SCORE:g} 分："
                     + ", ".join(failed_dims),
                     "需要重写对应段落，而不是补术语或扩写套话。",
                 ],
@@ -114,7 +117,7 @@ class QualityGate:
                 failed_dimensions=[],
                 total_score=total_score,
                 recommendations=required_revisions
-                or ["仍有关键追问未回答或回答不够深入，需要按 depth_questions 重写。"],
+                or ["仍有关键追问缺失，需要按 depth_questions 补上。"],
                 depth_questions=normalized_questions,
             )
 
@@ -124,7 +127,7 @@ class QualityGate:
             quality_scores=quality_scores,
             failed_dimensions=[],
             total_score=total_score,
-            recommendations=["四项判浅标准和关键追问均通过。"],
+            recommendations=["四项判浅标准通过，且没有缺失的关键追问。"],
             depth_questions=normalized_questions,
         )
 

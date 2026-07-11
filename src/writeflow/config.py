@@ -218,7 +218,7 @@ def get_settings(refresh: bool = False) -> Settings:
         max_retries=_env_int("WRITEFLOW_MAX_RETRIES", 3),
         max_rounds=_env_int("MAX_ROUND", _env_int("WRITEFLOW_MAX_ROUNDS", 5)),
         min_rounds=_env_int("MIN_ROUND", _env_int("WRITEFLOW_MIN_ROUNDS", 2)),
-        quality_depth_threshold=_env_float("QUALITY_DEPTH_THRESHOLD", 6.0),
+        quality_depth_threshold=_env_float("QUALITY_DEPTH_THRESHOLD", 5.0),
         search_provider=_env("WRITEFLOW_SEARCH_PROVIDER", "none").lower() or "none",
     )
     return _settings

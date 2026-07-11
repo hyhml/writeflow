@@ -56,6 +56,14 @@ python3 write.py "技术进步与社会不平等"
 writeflow submit "技术进步与社会不平等"
 ```
 
+启动本地 Web 工作台：
+
+```bash
+writeflow web --port 8765
+```
+
+打开 `http://127.0.0.1:8765` 后，可以在网页上填写主题、回答 Observation Interview、生成补充追问、启动写作任务，并实时查看工作规划、当前进度、中间 trace 和最终稿。
+
 保存为 Markdown 文件：
 
 ```bash
@@ -114,6 +122,8 @@ outputs/主题_时间_status.jsonl
 从 v0.2.9 开始，`--live` 会在终端实时显示每个 Agent 的进度，并在使用 `-o` 时保存 `_status.json` 和 `_status.jsonl`。v0.2.10 开始，`-o` 会默认开启进度显示和状态文件。Novelty Gate 第一次失败、退回 Thesis Architect、第二次失败停止等状态都会显示出来；retry trace 也会保存为独立文件，不再覆盖初次结果。
 
 从 v0.2.11 开始，`--interview` 可以在 Claude Code / WSL 终端里进行交互式 Observation Interview。系统会先问人类观察，再把问答保存为 `_interview.json` / `_interview.md`，最后把合并后的观察材料传入正式写作流程。
+
+从 v0.2.12 开始，新增本地 Web 工作台 `writeflow web`，可以在浏览器里查看完整工作规划、实时进度、中间输出和最终稿；同时降低 Depth Judge 默认门槛，四项判浅维度从全部 >= 6 调整为全部 >= 5，`depth_questions` 中的 `not_deep_enough` 改为改进建议，只有 `missing` 会阻断通过。
 
 ## 开发与测试
 
@@ -213,13 +223,15 @@ git push
 - 9 个 Agent：Observation Interviewer、Local Voice Collector、Researcher、Thesis Architect、Real Novelty Gate、Writer、Devil Advocate、Judge、Editor
 - `WriteFlow.write(topic, context={"human_observation": "...", "search_results": [...]})`
 - `WriteFlow.write(..., progress_callback=callback)` 实时接收 Agent 进度事件
+- `WriteFlow.write(..., trace_callback=callback)` 实时接收 Agent 中间输出
+- `writeflow web --port 8765` 启动本地 Web 工作台
 - `--observation` / `--observation-file` 输入人的本地观察
 - `--interview` 在终端里逐题收集人的观察并生成补充追问
 - `-o` 默认显示终端进度并保存 `_status.json` / `_status.jsonl`；`--live` 可在不保存文件时显式显示进度
 - Writer 围绕 `core_claim` 主轴推进，避免主题综述式浅层覆盖
 - Real Novelty Gate 对 case / structure / solution 三类真实新意做一票否决
 - Judge 驱动的多轮重写与质疑流程
-- 4 项判浅标准、`depth_questions` 与 Quality Gate
+- 4 项判浅标准、`depth_questions` 与更宽松的 Quality Gate
 - `.env` 配置读取
 - DeepSeek / MiniMax / Anthropic / 通用 OpenAI-compatible 后端选择
 - `python3 write.py "主题" -o` 保存 `.md` 稿件和 `_scores.json` 判浅记录

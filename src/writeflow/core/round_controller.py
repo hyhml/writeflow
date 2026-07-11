@@ -140,7 +140,7 @@ class RoundController:
         if not scores:
             return False
 
-        return all(score >= 6 for score in scores.values())
+        return all(score >= 5 for score in scores.values())
 
     def _check_stalemate(self) -> bool:
         """检查是否陷入僵局"""

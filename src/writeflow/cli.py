@@ -23,6 +23,7 @@ WriteFLow - 批判性深度稿件多 Agent 生产系统
 命令:
   start               检查当前运行配置
   submit <主题>        立即生成一个新稿件
+  web                 启动本地 Web 工作台
   status <任务ID>      查看任务状态
   list                列出所有任务
 
@@ -30,6 +31,7 @@ WriteFLow - 批判性深度稿件多 Agent 生产系统
   writeflow start
   writeflow submit "当代资本主义的结构性矛盾"
   writeflow submit "深圳电动车治理" --observation "我看到的本地反常现象..." --live
+  writeflow web --port 8765
   writeflow status abc123-def456
 
 更多帮助: writeflow --help
@@ -54,6 +56,8 @@ async def main() -> int:
             return await cmd_start(args[1:])
         if command == "submit":
             return await cmd_submit(args[1:])
+        if command == "web":
+            return await cmd_web(args[1:])
         if command == "status":
             return await cmd_status(args[1:])
         if command == "list":
@@ -149,6 +153,20 @@ async def cmd_submit(args: list[str]) -> int:
     print(result.content[:1000])
     if len(result.content) > 1000:
         print("... (省略)")
+    return 0
+
+
+async def cmd_web(args: list[str]) -> int:
+    """Start the built-in local web UI."""
+
+    parser = argparse.ArgumentParser(prog="writeflow web")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", default=8765, type=int)
+    parsed = parser.parse_args(args)
+
+    from writeflow.web import serve
+
+    serve(host=parsed.host, port=parsed.port)
     return 0
 
 

@@ -42,7 +42,7 @@ JUDGE_SYSTEM_PROMPT = """你是一位判浅审稿人。
 3. 有没有每段都只讲到第一层？
 4. 解决方案是否只是口号？
 
-四项全部达到 6 分，并且 depth_questions 没有 missing/not_deep_enough 才通过。输出 JSON。"""
+四项全部达到 5 分，并且 depth_questions 没有 missing 才通过；not_deep_enough 只作为改进建议。输出 JSON。"""
 
 
 EDITOR_SYSTEM_PROMPT = """你是一位最终编辑。
