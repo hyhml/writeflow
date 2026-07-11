@@ -11,6 +11,28 @@ WriteFLow 是一个本地运行的多 Agent 深度稿件生成工具。它把人
 
 > Claude Code 和 Codex 都可以用来开发这个项目。项目运行本身不依赖某个代码助手，而是依赖 `.env` 里的模型 API Key。
 
+## 推荐使用网页版
+
+日常写作推荐先用本地 Web 工作台。网页版可以填写主题和人的观察，实时查看每一轮、每个 Agent 的中间输出，并在 Agent 输出后插入人工补充。
+
+在项目目录中配置好 `.env` 后启动：
+
+```bash
+PYTHONPATH=src python3 -m writeflow.cli web --host 127.0.0.1 --port 8765
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:8765/
+```
+
+如果已经通过 `pip install -e .` 安装，也可以使用：
+
+```bash
+writeflow web --port 8765
+```
+
 ## WSL 快速开始
 
 推荐在 WSL 的 Linux 文件系统中开发：
