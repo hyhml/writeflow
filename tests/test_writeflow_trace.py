@@ -274,7 +274,7 @@ def test_precheck_failure_skips_devil_and_sends_feedback_to_next_draft(monkeypat
                 name: 8 for name in wf_module.QualityScores.__dataclass_fields__.keys()
             }
             if SequencedJudge.calls == 1:
-                scores["方案具体性"] = 5
+                scores["方案具体性"] = 4.9
             return {
                 "quality_scores": scores,
                 "depth_questions": [],
@@ -474,7 +474,7 @@ def test_editor_is_not_called_when_final_depth_judge_fails(monkeypatch):
             scores = {
                 name: 8 for name in wf_module.QualityScores.__dataclass_fields__.keys()
             }
-            scores["层次穿透"] = 5
+            scores["层次穿透"] = 4.9
             return {
                 "quality_scores": scores,
                 "depth_questions": [],
