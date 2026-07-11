@@ -125,6 +125,8 @@ outputs/主题_时间_status.jsonl
 
 从 v0.2.12 开始，新增本地 Web 工作台 `writeflow web`，可以在浏览器里查看完整工作规划、实时进度、中间输出和最终稿；同时降低 Depth Judge 默认门槛，四项判浅维度从全部 >= 6 调整为全部 >= 5，`depth_questions` 中的 `not_deep_enough` 改为改进建议，只有 `missing` 会阻断通过。
 
+从 v0.2.13 开始，如果达到最大轮次后仍未通过 Depth Judge，系统会保存评分最高的候选稿，而不是只保留最后一轮稿件；候选稿正文末尾会追加“未通过原因”，列出最高评分、失败阶段、未达标维度、关键追问和修改建议。
+
 ## 开发与测试
 
 v0.2.2 开始，项目包含不依赖真实 API Key 的自动化测试。安装开发依赖后运行：
@@ -232,6 +234,7 @@ git push
 - Real Novelty Gate 对 case / structure / solution 三类真实新意做一票否决
 - Judge 驱动的多轮重写与质疑流程
 - 4 项判浅标准、`depth_questions` 与更宽松的 Quality Gate
+- 达到最大轮次仍失败时，保存最高评分候选稿并附失败原因
 - `.env` 配置读取
 - DeepSeek / MiniMax / Anthropic / 通用 OpenAI-compatible 后端选择
 - `python3 write.py "主题" -o` 保存 `.md` 稿件和 `_scores.json` 判浅记录

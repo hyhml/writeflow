@@ -516,5 +516,82 @@ def test_editor_is_not_called_when_final_depth_judge_fails(monkeypatch):
     assert result.pass_reason == "shallow_dimensions"
     assert "devil_advocate_criticisms" not in stages
     assert "editor_raw" not in stages
+    assert "best_failed_candidate" in stages
+    assert "## 未通过原因" in result.content
+    assert "最高评分" in result.content
     assert CountingDevil.calls == 0
     assert CountingEditor.calls == 0
+
+
+def test_max_round_failure_returns_highest_scoring_candidate(monkeypatch):
+    class RoundWriter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def process(self, input_data):
+            return {
+                "content": f"# 第{input_data.get('round')}轮稿\n\n正文 {input_data.get('round')}。"
+            }
+
+    class FallingJudge:
+        calls = 0
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def process(self, input_data):
+            FallingJudge.calls += 1
+            if FallingJudge.calls == 1:
+                scores = {
+                    "概念克制": 5,
+                    "句子必要性": 5,
+                    "层次穿透": 5,
+                    "方案具体性": 4.9,
+                }
+            else:
+                scores = {
+                    "概念克制": 4.8,
+                    "句子必要性": 4.8,
+                    "层次穿透": 4.8,
+                    "方案具体性": 4.8,
+                }
+            return {
+                "quality_scores": scores,
+                "depth_questions": [
+                    {
+                        "target": "solution",
+                        "question": "方案的执行阻力讲了吗？",
+                        "why_it_matters": "关系到方案是否具体。",
+                        "status": "answered",
+                        "required_revision": "",
+                    }
+                ],
+                "key_issues": ["方案仍不够具体。"],
+                "recommendations": ["补充行动主体和代价承担者。"],
+            }
+
+    monkeypatch.setattr(wf_module, "ObservationInterviewerAgent", MockObservationInterviewer)
+    monkeypatch.setattr(wf_module, "LocalVoiceCollectorAgent", MockLocalVoiceCollector)
+    monkeypatch.setattr(wf_module, "ResearcherAgent", MockResearcher)
+    monkeypatch.setattr(wf_module, "ThesisArchitectAgent", MockThesisArchitect)
+    monkeypatch.setattr(wf_module, "RealNoveltyGateAgent", MockRealNoveltyGate)
+    monkeypatch.setattr(wf_module, "WriterAgent", RoundWriter)
+    monkeypatch.setattr(wf_module, "DevilAdvocateAgent", MockDevilAdvocate)
+    monkeypatch.setattr(wf_module, "JudgeAgent", FallingJudge)
+    monkeypatch.setattr(wf_module, "EditorAgent", MockEditor)
+
+    result = asyncio.run(async_write_with_two_rounds())
+    best_trace = [
+        event
+        for event in result.trace_events
+        if event.stage == "best_failed_candidate"
+    ][0]
+
+    assert result.passed is False
+    assert result.content.startswith("# 第1轮稿")
+    assert "# 第2轮稿" not in result.content
+    assert "## 未通过原因" in result.content
+    assert "最高评分：19.9 / 40" in result.content
+    assert result.scores.to_dict()["方案具体性"] == 4.9
+    assert best_trace.round_number == 1
+    assert best_trace.output["total_score"] == 19.9

@@ -113,6 +113,19 @@ class TraceEventBuffer(list):
 
 
 @dataclass
+class BestFailedCandidate:
+    """Highest-scoring draft retained when the workflow cannot pass the gate."""
+
+    content: str
+    scores: QualityScores
+    gate_result: GateResult
+    judge_output: Dict[str, Any]
+    stage: str
+    round_number: int
+    total_score: float
+
+
+@dataclass
 class WriteResult:
     """写作结果"""
     content: str
@@ -521,6 +534,7 @@ class WriteFlow:
         gate_result: Optional[GateResult] = None
         rewrite_feedback: Dict[str, Any] = {}
         completed_rounds = 0
+        best_failed_candidate: Optional[BestFailedCandidate] = None
 
         for round_num in range(1, max_rounds + 1):
             completed_rounds = round_num
@@ -588,6 +602,14 @@ class WriteFlow:
                 novelty_assets=novelty_assets,
             )
             current_scores = self._parse_scores(gate_result)
+            best_failed_candidate = self._select_best_failed_candidate(
+                best_failed_candidate,
+                content=content,
+                gate_result=gate_result,
+                judge_output=judge_output,
+                stage="judge_precheck",
+                round_number=round_num,
+            )
             precheck_output = {
                 "agent_result": judge_output,
                 "gate_result": self._gate_result_to_dict(gate_result),
@@ -729,6 +751,14 @@ class WriteFlow:
                 novelty_assets=novelty_assets,
             )
             current_scores = self._parse_scores(gate_result)
+            best_failed_candidate = self._select_best_failed_candidate(
+                best_failed_candidate,
+                content=content,
+                gate_result=gate_result,
+                judge_output=judge_output,
+                stage="judge_final",
+                round_number=round_num,
+            )
             self._record_trace(
                 trace_events,
                 stage="judge_final",
@@ -807,6 +837,30 @@ class WriteFlow:
                 status="skipped",
                 message="未通过 Gate，跳过 Editor",
             )
+            if best_failed_candidate:
+                content = self._build_best_failed_candidate_content(
+                    best_failed_candidate,
+                    completed_rounds=completed_rounds,
+                )
+                current_scores = best_failed_candidate.scores
+                gate_result = best_failed_candidate.gate_result
+                self._record_trace(
+                    trace_events,
+                    stage="best_failed_candidate",
+                    agent="writeflow",
+                    round_number=best_failed_candidate.round_number,
+                    input_summary={
+                        "completed_rounds": completed_rounds,
+                        "candidate_stage": best_failed_candidate.stage,
+                    },
+                    output={
+                        "decision": "Max rounds reached; saved highest-scoring failed candidate",
+                        "total_score": best_failed_candidate.total_score,
+                        "scores": best_failed_candidate.scores.to_dict(),
+                        "pass_reason": best_failed_candidate.gate_result.reason,
+                        "failed_dimensions": best_failed_candidate.gate_result.failed_dimensions,
+                    },
+                )
 
         content = clean_final_article(content)
         self._record_trace(
@@ -1182,6 +1236,118 @@ class WriteFlow:
         })
         raw_content = result.get("content", content)
         return raw_content, clean_final_article(raw_content)
+
+    def _select_best_failed_candidate(
+        self,
+        current: Optional[BestFailedCandidate],
+        *,
+        content: str,
+        gate_result: GateResult,
+        judge_output: Dict[str, Any],
+        stage: str,
+        round_number: int,
+    ) -> Optional[BestFailedCandidate]:
+        """Keep the highest-scoring failed draft for fallback output."""
+        if not content.strip() or gate_result.passed:
+            return current
+
+        scores = self._parse_scores(gate_result)
+        total_score = gate_result.total_score
+        candidate = BestFailedCandidate(
+            content=content,
+            scores=scores,
+            gate_result=gate_result,
+            judge_output=judge_output,
+            stage=stage,
+            round_number=round_number,
+            total_score=total_score,
+        )
+        if current is None:
+            return candidate
+        if candidate.total_score > current.total_score:
+            return candidate
+        if (
+            candidate.total_score == current.total_score
+            and candidate.stage == "judge_final"
+            and current.stage != "judge_final"
+        ):
+            return candidate
+        return current
+
+    def _build_best_failed_candidate_content(
+        self,
+        candidate: BestFailedCandidate,
+        *,
+        completed_rounds: int,
+    ) -> str:
+        """Append failure diagnostics to the highest-scoring failed draft."""
+        body = clean_final_article(candidate.content).rstrip()
+        appendix = self._render_failure_appendix(candidate, completed_rounds=completed_rounds)
+        return f"{body}\n\n---\n\n{appendix}\n" if body else f"{appendix}\n"
+
+    def _render_failure_appendix(
+        self,
+        candidate: BestFailedCandidate,
+        *,
+        completed_rounds: int,
+    ) -> str:
+        gate_result = candidate.gate_result
+        lines = [
+            "## 未通过原因",
+            "",
+            "这是完整流程结束后保留下来的最高评分候选稿，尚未通过 Depth Judge。",
+            "",
+            f"- 完成轮次：{completed_rounds}",
+            f"- 候选来源：第 {candidate.round_number} 轮 `{candidate.stage}`",
+            f"- 最高评分：{candidate.total_score:g} / 40",
+            f"- Gate 结果：未通过",
+            f"- 失败原因：{gate_result.reason}",
+        ]
+
+        failed_dimensions = gate_result.failed_dimensions
+        if failed_dimensions:
+            lines.append("- 未达标维度：" + "、".join(failed_dimensions))
+
+        score_parts = [
+            f"{name} {value:g}"
+            for name, value in candidate.scores.to_dict().items()
+        ]
+        if score_parts:
+            lines.append("- 四项评分：" + "；".join(score_parts))
+
+        depth_questions = [
+            question
+            for question in gate_result.depth_questions
+            if question.get("status") in {"missing", "not_deep_enough"}
+        ]
+        if depth_questions:
+            lines.extend(["", "### 仍需处理的追问", ""])
+            for question in depth_questions:
+                status = question.get("status", "")
+                text = question.get("question", "")
+                revision = question.get("required_revision", "")
+                lines.append(f"- [{status}] {text}")
+                if revision:
+                    lines.append(f"  建议：{revision}")
+
+        recommendations = gate_result.recommendations or candidate.judge_output.get(
+            "recommendations",
+            [],
+        )
+        if recommendations:
+            lines.extend(["", "### 修改建议", ""])
+            for item in recommendations:
+                if str(item).strip():
+                    lines.append(f"- {str(item).strip()}")
+
+        key_issues = candidate.judge_output.get("key_issues", [])
+        if key_issues:
+            lines.extend(["", "### Judge 标出的主要问题", ""])
+            for item in key_issues:
+                if str(item).strip():
+                    lines.append(f"- {str(item).strip()}")
+
+        return "\n".join(lines).rstrip()
 
     def _record_trace(
         self,
