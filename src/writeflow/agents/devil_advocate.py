@@ -74,9 +74,14 @@ class DevilAdvocateAgent(BaseAgent):
         topic = input_data.get("topic", "")
         materials = input_data.get("materials", [])
         previous_criticisms = input_data.get("previous_criticisms", [])
+        human_interventions = input_data.get("human_interventions", [])
 
         critique_prompt = self._build_critique_prompt(
-            topic, content, materials, previous_criticisms
+            topic,
+            content,
+            materials,
+            previous_criticisms,
+            human_interventions,
         )
 
         messages = [{"role": "user", "content": critique_prompt}]
@@ -95,7 +100,8 @@ class DevilAdvocateAgent(BaseAgent):
         topic: str,
         content: str,
         materials: List[dict],
-        previous_criticisms: List[dict]
+        previous_criticisms: List[dict],
+        human_interventions: Optional[List[dict]] = None,
     ) -> str:
         """构建批判提示"""
         prompt = f"""请对以下文章进行深度批判性质疑：
@@ -104,6 +110,9 @@ class DevilAdvocateAgent(BaseAgent):
 
 文章内容：
 {content}
+
+【运行中人工补充】
+{json.dumps(human_interventions or [], ensure_ascii=False, indent=2)}
 
 【批判角度】
 请从以下角度进行批判（每角度至少一条质疑）：

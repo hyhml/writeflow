@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 import traceback
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
@@ -60,6 +61,8 @@ class WebTask:
     updated_at: str = field(default_factory=utc_now)
     events: list[dict[str, Any]] = field(default_factory=list)
     trace_events: list[dict[str, Any]] = field(default_factory=list)
+    interventions: list[dict[str, Any]] = field(default_factory=list)
+    active_intervention: Optional[dict[str, Any]] = None
     result: Optional[dict[str, Any]] = None
     error: str = ""
     traceback: str = ""
@@ -86,6 +89,8 @@ class WebTask:
             "updated_at": self.updated_at,
             "events": self.events,
             "trace_events": self.trace_events,
+            "interventions": self.interventions,
+            "active_intervention": self.active_intervention,
             "current": self.events[-1] if self.events else None,
             "event_count": len(self.events),
             "result": self.result,
@@ -104,6 +109,7 @@ class WebTaskManager:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
         self._tasks: dict[str, WebTask] = {}
 
     def list_tasks(self) -> list[dict[str, Any]]:
@@ -164,6 +170,114 @@ class WebTaskManager:
             task = self._tasks.get(task_id)
             if task:
                 task.add_trace_event(event)
+                self._condition.notify_all()
+
+    def _handle_trace_event(self, task_id: str, event: TraceEvent | dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Append trace output, then open a short live user feedback window."""
+        data = event.to_dict() if hasattr(event, "to_dict") else dict(event)
+        intervention_id = ""
+        with self._condition:
+            task = self._tasks.get(task_id)
+            if not task:
+                return None
+            task.add_trace_event(data)
+            index = len(task.trace_events)
+            intervention_id = f"{task_id}-intervention-{index}"
+            task.active_intervention = {
+                "id": intervention_id,
+                "status": "open",
+                "trace_index": index,
+                "stage": data.get("stage", ""),
+                "agent": data.get("agent", ""),
+                "round": data.get("round"),
+                "attempt": data.get("attempt", 1),
+                "opened_at": utc_now(),
+                "deadline_seconds": 5,
+                "content": "",
+            }
+            self._condition.notify_all()
+
+            deadline = time.monotonic() + 5
+            while True:
+                active = task.active_intervention
+                if not active or active.get("id") != intervention_id:
+                    return None
+
+                status = active.get("status")
+                if status == "submitted":
+                    content = str(active.get("content", "") or "").strip()
+                    active["closed_at"] = utc_now()
+                    task.interventions.append(dict(active))
+                    task.active_intervention = None
+                    self._condition.notify_all()
+                    if not content:
+                        return None
+                    return {
+                        "content": content,
+                        "after_stage": data.get("stage", ""),
+                        "after_agent": data.get("agent", ""),
+                        "round": data.get("round"),
+                        "attempt": data.get("attempt", 1),
+                        "created_at": active.get("closed_at", utc_now()),
+                    }
+
+                if status == "cancelled":
+                    active["closed_at"] = utc_now()
+                    task.interventions.append(dict(active))
+                    task.active_intervention = None
+                    self._condition.notify_all()
+                    return None
+
+                if status == "typing":
+                    self._condition.wait()
+                    continue
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    active["status"] = "expired"
+                    active["closed_at"] = utc_now()
+                    task.interventions.append(dict(active))
+                    task.active_intervention = None
+                    self._condition.notify_all()
+                    return None
+                self._condition.wait(timeout=remaining)
+
+    def update_intervention(
+        self,
+        task_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        action = str(payload.get("action", "") or "").strip()
+        content = str(payload.get("content", "") or "")
+        with self._condition:
+            task = self._tasks.get(task_id)
+            if not task:
+                raise ValueError("task not found")
+            active = task.active_intervention
+            if not active:
+                return {"active_intervention": None}
+            requested_id = str(payload.get("intervention_id", "") or "")
+            if requested_id and requested_id != active.get("id"):
+                return {"active_intervention": json_safe(active)}
+
+            if action == "typing":
+                if active.get("status") == "open":
+                    active["status"] = "typing"
+                    active["typing_started_at"] = utc_now()
+                active["content"] = content
+            elif action == "submit":
+                active["status"] = "submitted"
+                active["content"] = content
+                active["submitted_at"] = utc_now()
+            elif action == "cancel":
+                active["status"] = "cancelled"
+                active["content"] = content
+            else:
+                raise ValueError("action must be typing, submit, or cancel")
+
+            task.updated_at = utc_now()
+            self._condition.notify_all()
+            return {"active_intervention": json_safe(active)}
 
     def _run_task_in_thread(self, task_id: str, output_paths: Any) -> None:
         asyncio.run(self._run_task(task_id, output_paths))
@@ -184,7 +298,7 @@ class WebTaskManager:
                 task.topic,
                 context={"human_observation": task.human_observation},
                 progress_callback=lambda event: self._append_event(task_id, event),
-                trace_callback=lambda event: self._append_trace_event(task_id, event),
+                trace_callback=lambda event: self._handle_trace_event(task_id, event),
             )
 
             if output_paths.article and output_paths.scores and output_paths.trace:
@@ -323,6 +437,10 @@ class WriteFlowWebHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
             if path == "/api/tasks":
                 self._send_json(self.server.manager.start_task(payload), status=HTTPStatus.CREATED)
+                return
+            if path.startswith("/api/tasks/") and path.endswith("/interventions"):
+                task_id = path.split("/")[-2]
+                self._send_json(self.server.manager.update_intervention(task_id, payload))
                 return
             if path == "/api/interview/followups":
                 self._send_json(asyncio.run(build_followups_from_payload(payload)))
@@ -619,6 +737,56 @@ INDEX_HTML = r"""<!doctype html>
       max-height: 62vh;
       overflow: auto;
     }
+    .trace-list {
+      display: grid;
+      gap: 10px;
+      max-height: 62vh;
+      overflow: auto;
+      padding-right: 2px;
+    }
+    .trace-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 10px;
+    }
+    .trace-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+    .trace-title { font-weight: 700; }
+    .trace-output {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      margin: 0;
+      max-height: 280px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: white;
+      padding: 10px;
+    }
+    .intervention {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fffdf7;
+      padding: 10px;
+      margin-bottom: 12px;
+    }
+    .intervention textarea {
+      min-height: 76px;
+      margin-top: 8px;
+    }
+    .intervention-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 8px;
+    }
     .score-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -698,7 +866,8 @@ INDEX_HTML = r"""<!doctype html>
             <div id="events" class="event-list"></div>
           </div>
           <div id="tab-trace" hidden>
-            <pre id="trace">暂无中间输出。</pre>
+            <div id="interventionBox"></div>
+            <div id="trace" class="trace-list">暂无中间输出。</div>
           </div>
           <div id="tab-result" hidden>
             <div id="scores"></div>
@@ -711,7 +880,7 @@ INDEX_HTML = r"""<!doctype html>
 
   <script>
     const fixedQuestions = __FIXED_QUESTIONS__;
-    const state = { steps: [], taskId: "", task: null, timer: null };
+    const state = { steps: [], taskId: "", task: null, timer: null, typingInterventionId: "" };
 
     const $ = (id) => document.getElementById(id);
 
@@ -795,6 +964,7 @@ INDEX_HTML = r"""<!doctype html>
         : "填写主题和观察材料后开始。";
       renderSteps();
       renderEvents(task.events || []);
+      renderIntervention(task.active_intervention || null);
       renderTrace(task.trace_events || (task.result && task.result.trace_events) || []);
       renderResult(task);
       if (task.status === "completed" || task.status === "failed") stopPolling();
@@ -812,13 +982,130 @@ INDEX_HTML = r"""<!doctype html>
 
     function renderTrace(trace) {
       if (!trace.length) {
-        $("trace").textContent = "暂无中间输出。";
+        $("trace").innerHTML = `<p class="muted">暂无中间输出。</p>`;
         return;
       }
-      $("trace").textContent = trace.map((event, index) =>
-        `${index + 1}. ${event.stage} / ${event.agent}${event.round ? " / round " + event.round : ""}\n` +
-        JSON.stringify(event.output, null, 2)
-      ).join("\n\n");
+      $("trace").innerHTML = trace.slice().reverse().map((event, offset) => {
+        const index = trace.length - offset;
+        const round = event.round ? ` · 第 ${event.round} 轮` : "";
+        const attempt = event.attempt && event.attempt > 1 ? ` · attempt ${event.attempt}` : "";
+        const title = `${index}. ${event.agent || "unknown"} / ${event.stage || "stage"}`;
+        return `
+          <article class="trace-card">
+            <div class="trace-head">
+              <div>
+                <div class="trace-title">${escapeHtml(title)}</div>
+                <div class="muted">${escapeHtml(event.created_at || "")}${round}${attempt}</div>
+              </div>
+              <span class="pill">${escapeHtml(event.agent || "")}</span>
+            </div>
+            ${renderTraceSummary(event)}
+            <pre class="trace-output">${escapeHtml(formatTraceOutput(event.output))}</pre>
+          </article>
+        `;
+      }).join("");
+    }
+
+    function renderTraceSummary(event) {
+      const input = event.input_summary || {};
+      const items = Object.entries(input).filter(([, value]) => value !== "" && value !== null && value !== undefined);
+      if (!items.length) return "";
+      return `<div class="muted">${items.map(([key, value]) =>
+        `${escapeHtml(key)}: ${escapeHtml(shortValue(value))}`
+      ).join(" · ")}</div>`;
+    }
+
+    function formatTraceOutput(output) {
+      if (output && typeof output === "object") {
+        if (typeof output.content === "string") return output.content;
+        if (typeof output.raw_content === "string") return output.raw_content;
+        if (typeof output.clean_content === "string") return output.clean_content;
+        return JSON.stringify(output, null, 2);
+      }
+      return String(output || "");
+    }
+
+    function shortValue(value) {
+      const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+      return text.length > 80 ? text.slice(0, 77) + "..." : text;
+    }
+
+    function renderIntervention(active) {
+      const box = $("interventionBox");
+      if (!active) {
+        box.innerHTML = "";
+        state.typingInterventionId = "";
+        return;
+      }
+      const existing = $("interventionInput");
+      if (
+        existing &&
+        existing.dataset.interventionId === active.id &&
+        document.activeElement === existing
+      ) {
+        return;
+      }
+      const isTyping = active.status === "typing";
+      const label = `${active.agent || "Agent"} / ${active.stage || "stage"}${active.round ? " · 第 " + active.round + " 轮" : ""}`;
+      box.innerHTML = `
+        <div class="intervention">
+          <strong>人工补充窗口</strong>
+          <div class="muted">${escapeHtml(label)} 输出后开放 5 秒；开始输入后会等待提交。</div>
+          <textarea id="interventionInput" data-intervention-id="${escapeAttr(active.id)}" placeholder="写下你希望后续 Agent 读取的补充、纠偏或追问。">${escapeHtml(active.content || "")}</textarea>
+          <div class="intervention-actions">
+            <span class="muted">${isTyping ? "正在等待你提交" : "未输入时 5 秒后自动继续"}</span>
+            <span>
+              <button id="cancelInterventionBtn" type="button">跳过</button>
+              <button id="submitInterventionBtn" class="primary" type="button">提交给后续 Agent</button>
+            </span>
+          </div>
+        </div>
+      `;
+      const input = $("interventionInput");
+      input.addEventListener("input", () => markTyping(active.id));
+      $("submitInterventionBtn").addEventListener("click", () => submitIntervention(active.id));
+      $("cancelInterventionBtn").addEventListener("click", () => cancelIntervention(active.id));
+      if (isTyping) input.focus();
+    }
+
+    async function markTyping(interventionId) {
+      if (!state.taskId || state.typingInterventionId === interventionId) return;
+      state.typingInterventionId = interventionId;
+      await api(`/api/tasks/${state.taskId}/interventions`, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "typing",
+          content: $("interventionInput").value
+        })
+      }).catch(console.error);
+    }
+
+    async function submitIntervention(interventionId) {
+      if (!state.taskId) return;
+      await api(`/api/tasks/${state.taskId}/interventions`, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "submit",
+          intervention_id: interventionId,
+          content: $("interventionInput").value
+        })
+      });
+      state.typingInterventionId = "";
+      await refreshTask();
+    }
+
+    async function cancelIntervention(interventionId) {
+      if (!state.taskId) return;
+      await api(`/api/tasks/${state.taskId}/interventions`, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "cancel",
+          intervention_id: interventionId,
+          content: $("interventionInput").value
+        })
+      });
+      state.typingInterventionId = "";
+      await refreshTask();
     }
 
     function renderResult(task) {

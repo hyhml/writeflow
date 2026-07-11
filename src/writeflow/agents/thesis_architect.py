@@ -27,6 +27,9 @@ THESIS_ARCHITECT_SYSTEM_PROMPT = """你是 Thesis Architect，不写正文，只
 
 要求：
 - core_claim 必须是一句可争辩的判断，不要写成“需要加强”“应该重视”“要辩证看待”。
+- 人类观察中的 raw_human_observation、user_requirements 和 must_preserve_details 是硬约束，不是可选素材。
+- 你可以把用户要求转化成更锋利的论点，但不得删除、反转、稀释或替换它的核心方向。
+- 如果材料和用户要求冲突，必须在 most_dangerous_counterargument 中呈现冲突，而不是把用户要求抹掉。
 - 不要直接写文章段落。
 - 不要输出 Markdown。
 - 只输出 JSON。"""
@@ -54,6 +57,7 @@ class ThesisArchitectAgent(BaseAgent):
         observation_brief = input_data.get("observation_brief", {})
         local_voice_brief = input_data.get("local_voice_brief", {})
         novelty_feedback = input_data.get("novelty_feedback", {})
+        human_interventions = input_data.get("human_interventions", [])
 
         response = await self.client.generate(
             messages=[
@@ -65,6 +69,7 @@ class ThesisArchitectAgent(BaseAgent):
                         observation_brief,
                         local_voice_brief,
                         novelty_feedback,
+                        human_interventions,
                     ),
                 }
             ],
@@ -85,17 +90,24 @@ class ThesisArchitectAgent(BaseAgent):
         observation_brief: Optional[dict[str, Any]] = None,
         local_voice_brief: Optional[dict[str, Any]] = None,
         novelty_feedback: Optional[dict[str, Any]] = None,
+        human_interventions: Optional[list[dict[str, Any]]] = None,
     ) -> str:
         materials_context = self._build_materials_context(materials)
         observation_context = json.dumps(observation_brief or {}, ensure_ascii=False, indent=2)
         local_voice_context = json.dumps(local_voice_brief or {}, ensure_ascii=False, indent=2)
         feedback_context = json.dumps(novelty_feedback or {}, ensure_ascii=False, indent=2)
+        human_context = json.dumps(human_interventions or [], ensure_ascii=False, indent=2)
         return f"""请为下面的写作任务生成“核心判断简报”。
 
 主题：{topic}
 
 人类观察：
 {observation_context}
+
+人类观察硬约束处理要求：
+- raw_human_observation 是用户原话或合并后的原始要求，必须读。
+- user_requirements / must_preserve_details 必须进入 core_claim、strongest_evidence、novelty_assets 或 preserved_human_requirements。
+- 不允许为了生成更“完整”的立论，把用户第一部分的写作方向和灵魂删掉。
 
 本地真实声音：
 {local_voice_context}
@@ -106,14 +118,18 @@ class ThesisArchitectAgent(BaseAgent):
 Novelty Gate 反馈（如果有，表示上一版新意不足，必须重建）：
 {feedback_context}
 
+运行中人工补充：
+{human_context}
+
 请只输出 JSON，字段必须完全包含：
 {{
   "core_claim": "一句最想证明的判断",
   "conflict_with_common_view": "它和普通观点的冲突",
   "common_sense_overturned": "如果成立，会推翻什么常识",
   "strongest_evidence": "最强证据或论据方向",
-  "most_dangerous_counterargument": "最危险的反驳",
-  "novelty_assets": [
+	  "most_dangerous_counterargument": "最危险的反驳",
+	  "preserved_human_requirements": ["从人类观察中原样保留下来的硬要求"],
+	  "novelty_assets": [
     {{
       "type": "case/structure/solution",
       "claim": "真实新意资产",

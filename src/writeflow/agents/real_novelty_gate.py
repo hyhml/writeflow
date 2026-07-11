@@ -79,6 +79,9 @@ class RealNoveltyGateAgent(BaseAgent):
 【Thesis Architect 简报】
 {json.dumps(input_data.get("thesis", {}), ensure_ascii=False, indent=2)}
 
+【运行中人工补充】
+{json.dumps(input_data.get("human_interventions", []), ensure_ascii=False, indent=2)}
+
 请只判断三类资产：case、structure、solution。
 只要三类中有任意一个真实成立，就 passed=true；三类都没有，则 passed=false，pass_reason="no_real_novelty"。"""
 

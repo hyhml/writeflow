@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from writeflow.web import build_observation_from_payload, normalize_answers, step_payload
+import threading
+
+from writeflow.web import (
+    WebTask,
+    WebTaskManager,
+    build_observation_from_payload,
+    normalize_answers,
+    step_payload,
+)
+from writeflow.writeflow import TraceEvent
 
 
 def test_build_observation_from_web_payload():
@@ -71,3 +80,40 @@ def test_step_payload_has_ordered_steps():
     assert steps[0]["index"] == 1
     assert steps[0]["step"] == "observation_interviewer"
     assert steps[-1]["step"] == "editor"
+
+
+def test_web_intervention_submit_returns_feedback_to_workflow():
+    manager = WebTaskManager()
+    task = WebTask(task_id="task-1", topic="测试主题")
+    with manager._lock:
+        manager._tasks[task.task_id] = task
+
+    result = {}
+
+    def wait_for_feedback():
+        result["feedback"] = manager._handle_trace_event(
+            task.task_id,
+            TraceEvent(stage="writer_draft", agent="writer", round_number=1),
+        )
+
+    thread = threading.Thread(target=wait_for_feedback)
+    thread.start()
+
+    with manager._condition:
+        manager._condition.wait_for(lambda: task.active_intervention is not None, timeout=1)
+        intervention_id = task.active_intervention["id"]
+
+    manager.update_intervention(
+        task.task_id,
+        {
+            "action": "submit",
+            "intervention_id": intervention_id,
+            "content": "请补充地铁口的具体场景。",
+        },
+    )
+    thread.join(timeout=1)
+
+    assert not thread.is_alive()
+    assert result["feedback"]["content"] == "请补充地铁口的具体场景。"
+    assert result["feedback"]["after_agent"] == "writer"
+    assert manager.get_task(task.task_id)["active_intervention"] is None

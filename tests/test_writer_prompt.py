@@ -13,12 +13,16 @@ def build_prompt() -> str:
             "common_sense_overturned": "看似中立的治理方案并不中立。",
             "strongest_evidence": "具体制度安排和个案。",
             "most_dangerous_counterargument": "可能忽视执行层面的复杂性。",
+            "preserved_human_requirements": ["保留现场怒气"],
         },
         materials=[{"material_type": "case", "content": "一个具体案例", "source": "mock"}],
         previous_rounds=[],
         observation_brief={
             "abnormal_phenomenon": "本地出现反常交通冲突",
             "case_difference": "这个案例和普通讨论不同",
+            "raw_human_observation": "不要写成温吞综述。",
+            "user_requirements": ["保留反讽语气"],
+            "must_preserve_details": ["地铁口冲突"],
         },
         local_voice_brief={
             "voices": [
@@ -86,6 +90,9 @@ def test_writer_prompt_includes_observation_voice_and_novelty_assets():
     assert "这里通勤节点很难走" in prompt
     assert "深圳狭长地形使交通节点矛盾更尖锐" in prompt
     assert "深圳地形和交通节点的关系讲透了吗？" in prompt
+    assert "不要写成温吞综述" in prompt
+    assert "保留反讽语气" in prompt
+    assert "优先级高于 Thesis Architect 的概括" in prompt
 
 
 def test_writer_revision_prompt_outputs_article_not_defense():

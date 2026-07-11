@@ -66,9 +66,17 @@ class EditorAgent(BaseAgent):
         key_issues = input_data.get("key_issues", [])
         criticisms = input_data.get("criticisms", [])
         thesis = input_data.get("thesis", {})
+        observation_brief = input_data.get("observation_brief", {})
+        human_interventions = input_data.get("human_interventions", [])
 
         edit_prompt = self._build_edit_prompt(
-            content, quality_scores, key_issues, criticisms, thesis
+            content,
+            quality_scores,
+            key_issues,
+            criticisms,
+            thesis,
+            observation_brief,
+            human_interventions,
         )
 
         messages = [{"role": "user", "content": edit_prompt}]
@@ -93,6 +101,8 @@ class EditorAgent(BaseAgent):
         key_issues: list,
         criticisms: list,
         thesis: dict | None = None,
+        observation_brief: dict | None = None,
+        human_interventions: list | None = None,
     ) -> str:
         """构建编辑提示"""
         prompt = f"""请对以下批判性文章进行最终编辑打磨：
@@ -102,6 +112,12 @@ class EditorAgent(BaseAgent):
 
 【不可削弱的核心判断】
 {(thesis or {}).get("core_claim", "")}
+
+【不可删除的人类观察与写作要求】
+{observation_brief or {}}
+
+【运行中人工补充】
+{human_interventions or []}
 
 【判浅评分】
 """
@@ -125,6 +141,7 @@ class EditorAgent(BaseAgent):
 3. 不得把尖锐判断改成折中综述
 4. 删除所有自我保护的妥协表述
 5. 强化机制、获益者、代价和具体证据
+6. 不得删除、改写或抹平“不可删除的人类观察与写作要求”中的原始方向和语气
 
 直接输出编辑后的文章全文。"""
 

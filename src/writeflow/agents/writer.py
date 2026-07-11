@@ -113,6 +113,7 @@ class WriterAgent(BaseAgent):
         depth_questions = input_data.get("depth_questions", [])
         previous_rounds = input_data.get("previous_rounds", [])
         rewrite_feedback = input_data.get("rewrite_feedback", {})
+        human_interventions = input_data.get("human_interventions", [])
 
         writing_prompt = self._build_writing_prompt(
             topic=topic,
@@ -124,6 +125,7 @@ class WriterAgent(BaseAgent):
             depth_questions=depth_questions,
             previous_rounds=previous_rounds,
             rewrite_feedback=rewrite_feedback,
+            human_interventions=human_interventions,
         )
 
         messages = [{"role": "user", "content": writing_prompt}]
@@ -153,6 +155,7 @@ class WriterAgent(BaseAgent):
         novelty_assets: list | None = None,
         depth_questions: list | None = None,
         rewrite_feedback: dict | None = None,
+        human_interventions: list | None = None,
     ) -> str:
         """Build the drafting prompt around one central argument."""
         materials_context = self._build_materials_context(materials)
@@ -161,6 +164,9 @@ class WriterAgent(BaseAgent):
         local_voice_context = self._build_local_voice_context(local_voice_brief or {})
         novelty_context = self._build_novelty_assets_context(novelty_assets or [])
         depth_question_context = self._build_depth_questions_context(depth_questions or [])
+        human_intervention_context = self._build_human_interventions_context(
+            human_interventions or []
+        )
 
         writing_prompt = f"""请围绕以下主题撰写一篇批判性分析文章：
 
@@ -175,6 +181,8 @@ class WriterAgent(BaseAgent):
 {novelty_context}
 
 {depth_question_context}
+
+{human_intervention_context}
 
 {materials_context}
 
@@ -226,6 +234,7 @@ class WriterAgent(BaseAgent):
         depth_questions = input_data.get("depth_questions", [])
         judge_feedback = input_data.get("judge_feedback", {})
         criticisms = input_data.get("criticisms", [])
+        human_interventions = input_data.get("human_interventions", [])
 
         revision_prompt = self._build_revision_prompt(
             topic=topic,
@@ -238,6 +247,7 @@ class WriterAgent(BaseAgent):
             depth_questions=depth_questions,
             judge_feedback=judge_feedback,
             criticisms=criticisms,
+            human_interventions=human_interventions,
         )
 
         messages = [{"role": "user", "content": revision_prompt}]
@@ -268,6 +278,7 @@ class WriterAgent(BaseAgent):
         local_voice_brief: dict | None = None,
         novelty_assets: list | None = None,
         depth_questions: list | None = None,
+        human_interventions: list | None = None,
     ) -> str:
         """Build a direct article-revision prompt."""
         prompt = f"""请直接修订以下文章，输出修订后的完整正文。
@@ -283,6 +294,8 @@ class WriterAgent(BaseAgent):
 {self._build_novelty_assets_context(novelty_assets or [])}
 
 {self._build_depth_questions_context(depth_questions or [])}
+
+{self._build_human_interventions_context(human_interventions or [])}
 
 【当前正文】
 {content}
@@ -412,12 +425,21 @@ class WriterAgent(BaseAgent):
         if not thesis:
             return "【核心判断简报】\n（无核心判断简报，请自行提出一个可争辩的核心判断。）"
 
+        preserved_requirements = thesis.get("preserved_human_requirements", [])
+        if isinstance(preserved_requirements, list):
+            preserved_text = "；".join(
+                str(item) for item in preserved_requirements if str(item).strip()
+            )
+        else:
+            preserved_text = str(preserved_requirements)
+
         return f"""【核心判断简报】
 - 核心判断：{thesis.get("core_claim", "")}
 - 与普通观点的冲突：{thesis.get("conflict_with_common_view", "")}
 - 将推翻的常识：{thesis.get("common_sense_overturned", "")}
 - 最强证据：{thesis.get("strongest_evidence", "")}
-- 最危险的反驳：{thesis.get("most_dangerous_counterargument", "")}"""
+- 最危险的反驳：{thesis.get("most_dangerous_counterargument", "")}
+- 已保留的人类硬要求：{preserved_text}"""
 
     def _build_observation_context(self, observation_brief: dict) -> str:
         """Build human observation context."""
@@ -429,13 +451,24 @@ class WriterAgent(BaseAgent):
             details_text = "；".join(str(item) for item in details if str(item).strip())
         else:
             details_text = str(details)
+        requirements = observation_brief.get("user_requirements", [])
+        if isinstance(requirements, list):
+            requirements_text = "；".join(
+                str(item) for item in requirements if str(item).strip()
+            )
+        else:
+            requirements_text = str(requirements)
 
         return f"""【人类观察】
+- 用户原始输入：{observation_brief.get("raw_human_observation", "")}
 - 反常现象：{observation_brief.get("abnormal_phenomenon", "")}
 - 案例差异：{observation_brief.get("case_difference", "")}
 - 直觉问题根源：{observation_brief.get("intuitive_root_cause", "")}
 - 具体解决方案：{observation_brief.get("concrete_solution", "")}
-- 不可丢失细节：{details_text}"""
+- 不可丢失细节：{details_text}
+- 用户硬性写作要求：{requirements_text}
+
+注意：上面的用户原始输入、不可丢失细节和硬性写作要求优先级高于 Thesis Architect 的概括；不得删掉它们的方向和语气。"""
 
     def _build_local_voice_context(self, local_voice_brief: dict) -> str:
         """Build local voice context."""
@@ -496,6 +529,22 @@ class WriterAgent(BaseAgent):
                 text += f"   为什么重要：{question['why_it_matters']}\n"
             if question.get("required_revision"):
                 text += f"   必须修订：{question['required_revision']}\n"
+        return text.rstrip()
+
+    def _build_human_interventions_context(self, interventions: list) -> str:
+        """Build runtime user feedback context from the web UI."""
+        if not interventions:
+            return "【运行中人工补充】\n（暂无。）"
+
+        text = "【运行中人工补充】\n"
+        text += "这些内容来自 Web 工作台，优先作为用户新增事实、方向或修改要求处理。\n"
+        for index, item in enumerate(interventions[-8:], 1):
+            if not isinstance(item, dict):
+                continue
+            round_number = item.get("round")
+            source = item.get("after_agent") or item.get("after_stage") or "unknown"
+            suffix = f"，第 {round_number} 轮" if round_number is not None else ""
+            text += f"{index}. 在 {source}{suffix} 之后补充：{item.get('content', '')}\n"
         return text.rstrip()
 
     def _build_materials_context(self, materials: list) -> str:

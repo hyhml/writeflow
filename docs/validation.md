@@ -354,3 +354,22 @@ outputs/<主题>_<时间>_interview.md
 ```
 
 **结论**：v0.2.11 只改输入界面层，不改 Depth Judge 或 Writer loop。`--interview` 会先收集人类观察，全部空答时停止生成，避免在缺少观察材料时继续空转。
+
+## v0.2.14 (2026-07-11)
+
+**目标**：增强 Web 工作台的可观察性和人工介入能力。中间输出按轮次、Agent 和 stage 分段展示；每个 Agent 输出后开放 5 秒人工补充窗口，用户开始输入后流程会等待提交。Observation Interviewer 现在保留用户原始输入、硬性写作要求和不可丢失细节，Thesis Architect、Writer、Judge、Devil Advocate 和 Editor 都会读取这些约束，避免第一部分的写作方向被后续摘要化后抹掉。
+
+**验证命令**：
+```bash
+python3 -m compileall src/writeflow tests
+pytest
+```
+
+**运行结果**：
+| 项目 | 状态 |
+|------|------|
+| 版本号 | 0.2.14 |
+| 编译检查 | 通过 |
+| pytest | 74 passed |
+
+**结论**：v0.2.14 让 Web 端可以清楚追踪“哪一轮、哪个 Agent 输出了什么”，并允许用户在长流程中插入补充意见；用户第一部分的原始要求被升级为硬约束，后续 Agent 不再只能读取被压缩后的观察摘要。

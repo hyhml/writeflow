@@ -84,8 +84,15 @@ class ResearcherAgent(BaseAgent):
         keywords = input_data.get("keywords", [])
         material_types = input_data.get("material_types", ["data", "case", "theory", "quote"])
         depth_level = input_data.get("depth_level", "medium")
+        human_interventions = input_data.get("human_interventions", [])
 
-        research_prompt = self._build_research_prompt(topic, keywords, material_types, depth_level)
+        research_prompt = self._build_research_prompt(
+            topic,
+            keywords,
+            material_types,
+            depth_level,
+            human_interventions,
+        )
 
         messages = [{"role": "user", "content": research_prompt}]
 
@@ -103,7 +110,8 @@ class ResearcherAgent(BaseAgent):
         topic: str,
         keywords: List[str],
         material_types: List[str],
-        depth_level: str
+        depth_level: str,
+        human_interventions: List[dict] | None = None,
     ) -> str:
         """构建研究提示"""
         prompt = f"""请围绕以下主题进行资料收集：
@@ -112,6 +120,8 @@ class ResearcherAgent(BaseAgent):
 关键词：{', '.join(keywords)}
 素材类型：{', '.join(material_types)}
 研究深度：{depth_level}
+
+运行中人工补充：{human_interventions or []}
 
 请尽可能收集以下类型的素材：
 """

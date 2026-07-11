@@ -103,9 +103,17 @@ class JudgeAgent(BaseAgent):
         materials = input_data.get("materials", [])
         thesis = input_data.get("thesis", {})
         novelty_assets = input_data.get("novelty_assets", [])
+        human_interventions = input_data.get("human_interventions", [])
 
         evaluation_prompt = self._build_evaluation_prompt(
-            topic, content, criticisms, defenses, materials, thesis, novelty_assets
+            topic,
+            content,
+            criticisms,
+            defenses,
+            materials,
+            thesis,
+            novelty_assets,
+            human_interventions,
         )
 
         response = await self.client.generate(
@@ -126,6 +134,7 @@ class JudgeAgent(BaseAgent):
         materials: List[dict],
         thesis: Optional[dict] = None,
         novelty_assets: Optional[List[dict]] = None,
+        human_interventions: Optional[List[dict]] = None,
     ) -> str:
         """Build the depth-focused evaluation prompt."""
         prompt = f"""请对下面这篇文章做“判浅”审稿，而不是综合质量评分。
@@ -137,6 +146,9 @@ class JudgeAgent(BaseAgent):
 
 【真实新意资产】
 {json.dumps(novelty_assets or [], ensure_ascii=False, indent=2)}
+
+【运行中人工补充】
+{json.dumps(human_interventions or [], ensure_ascii=False, indent=2)}
 
 文章内容：
 {content[:3000]}...

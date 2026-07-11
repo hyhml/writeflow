@@ -127,6 +127,8 @@ outputs/主题_时间_status.jsonl
 
 从 v0.2.13 开始，如果达到最大轮次后仍未通过 Depth Judge，系统会保存评分最高的候选稿，而不是只保留最后一轮稿件；候选稿正文末尾会追加“未通过原因”，列出最高评分、失败阶段、未达标维度、关键追问和修改建议。
 
+从 v0.2.14 开始，Web 工作台的中间输出按轮次、Agent 和 stage 分段显示；每个 Agent 输出后会打开 5 秒人工补充窗口，开始输入后会等待提交。Observation Interviewer 会保留用户原始输入和硬性写作要求，Thesis Architect、Writer、Judge、Devil Advocate 和 Editor 都会读取这些要求，避免第一部分的写作方向被后续 Agent 摘要化后抹掉。
+
 ## 开发与测试
 
 v0.2.2 开始，项目包含不依赖真实 API Key 的自动化测试。安装开发依赖后运行：
@@ -229,6 +231,7 @@ git push
 - `writeflow web --port 8765` 启动本地 Web 工作台
 - `--observation` / `--observation-file` 输入人的本地观察
 - `--interview` 在终端里逐题收集人的观察并生成补充追问
+- Web 工作台支持按 Agent/轮次查看中间输出，并在 Agent 输出后插入人工补充
 - `-o` 默认显示终端进度并保存 `_status.json` / `_status.jsonl`；`--live` 可在不保存文件时显式显示进度
 - Writer 围绕 `core_claim` 主轴推进，避免主题综述式浅层覆盖
 - Real Novelty Gate 对 case / structure / solution 三类真实新意做一票否决

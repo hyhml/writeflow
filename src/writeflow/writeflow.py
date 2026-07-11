@@ -107,9 +107,14 @@ class TraceEvent:
 class TraceEventBuffer(list):
     """Trace list with an optional sync callback for live observers."""
 
-    def __init__(self, trace_callback: Optional[Callable[[TraceEvent], Any]] = None):
+    def __init__(
+        self,
+        trace_callback: Optional[Callable[[TraceEvent], Any]] = None,
+        human_interventions: Optional[List[Dict[str, Any]]] = None,
+    ):
         super().__init__()
         self.trace_callback = trace_callback
+        self.human_interventions = human_interventions
 
 
 @dataclass
@@ -227,7 +232,13 @@ class WriteFlow:
         """
         max_rounds = max_rounds or self.max_rounds
         task_id = str(uuid.uuid4())
-        trace_events: List[TraceEvent] = TraceEventBuffer(trace_callback)
+        human_interventions: List[Dict[str, Any]] = list(
+            context.get("human_interventions", []) if context else []
+        )
+        trace_events: List[TraceEvent] = TraceEventBuffer(
+            trace_callback,
+            human_interventions=human_interventions,
+        )
 
         logger.info(f"Task {task_id}: Starting write for topic: {topic}")
 
@@ -277,6 +288,7 @@ class WriteFlow:
             topic,
             observation_brief=observation_brief,
             search_results=context.get("search_results", []),
+            human_interventions=human_interventions,
         )
         local_voice_brief = local_voice_result.get("local_voice_brief", {})
         self._record_trace(
@@ -310,6 +322,7 @@ class WriteFlow:
             topic,
             observation_brief=observation_brief,
             local_voice_brief=local_voice_brief,
+            human_interventions=human_interventions,
         )
         self._record_trace(
             trace_events,
@@ -346,6 +359,7 @@ class WriteFlow:
             materials,
             observation_brief=observation_brief,
             local_voice_brief=local_voice_brief,
+            human_interventions=human_interventions,
         )
         self._record_trace(
             trace_events,
@@ -385,6 +399,7 @@ class WriteFlow:
             local_voice_brief=local_voice_brief,
             materials=materials,
             thesis=thesis,
+            human_interventions=human_interventions,
         )
         novelty_decision = (
             "passed, sent to Writer"
@@ -430,6 +445,7 @@ class WriteFlow:
                 observation_brief=observation_brief,
                 local_voice_brief=local_voice_brief,
                 novelty_feedback=novelty_result,
+                human_interventions=human_interventions,
             )
             self._record_trace(
                 trace_events,
@@ -466,6 +482,7 @@ class WriteFlow:
                 local_voice_brief=local_voice_brief,
                 materials=materials,
                 thesis=thesis,
+                human_interventions=human_interventions,
             )
             novelty_decision = (
                 "passed, sent to Writer"
@@ -561,6 +578,7 @@ class WriteFlow:
                 round_num,
                 content,
                 rewrite_feedback,
+                human_interventions,
             )
             self._record_trace(
                 trace_events,
@@ -600,6 +618,7 @@ class WriteFlow:
                 materials=materials,
                 thesis=thesis,
                 novelty_assets=novelty_assets,
+                human_interventions=human_interventions,
             )
             current_scores = self._parse_scores(gate_result)
             best_failed_candidate = self._select_best_failed_candidate(
@@ -661,7 +680,13 @@ class WriteFlow:
                 message="提出反方质疑",
             )
             criticisms = await self._criticize(
-                task_id, topic, content, materials, round_num, debate_graph
+                task_id,
+                topic,
+                content,
+                materials,
+                round_num,
+                debate_graph,
+                human_interventions,
             )
             self._record_trace(
                 trace_events,
@@ -711,6 +736,7 @@ class WriteFlow:
                     phase="judge_precheck",
                 ),
                 criticisms,
+                human_interventions,
             )
             self._record_trace(
                 trace_events,
@@ -749,6 +775,7 @@ class WriteFlow:
                 materials=materials,
                 thesis=thesis,
                 novelty_assets=novelty_assets,
+                human_interventions=human_interventions,
             )
             current_scores = self._parse_scores(gate_result)
             best_failed_candidate = self._select_best_failed_candidate(
@@ -813,7 +840,12 @@ class WriteFlow:
                 message="最终编辑清洗",
             )
             editor_raw, content = await self._edit_content(
-                task_id, content, current_scores, thesis
+                task_id,
+                content,
+                current_scores,
+                thesis,
+                observation_brief,
+                human_interventions,
             )
             self._record_trace(
                 trace_events,
@@ -944,6 +976,7 @@ class WriteFlow:
         topic: str,
         observation_brief: Dict[str, Any],
         search_results: Optional[List[Dict[str, Any]]] = None,
+        human_interventions: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """收集或标准化真实声音；无搜索配置时不得编造引语。"""
         return await self.agents["local_voice_collector"].process({
@@ -951,6 +984,7 @@ class WriteFlow:
             "topic": topic,
             "observation_brief": observation_brief,
             "search_results": search_results or [],
+            "human_interventions": human_interventions or [],
         })
 
     async def _collect_materials(
@@ -959,6 +993,7 @@ class WriteFlow:
         topic: str,
         observation_brief: Optional[Dict[str, Any]] = None,
         local_voice_brief: Optional[Dict[str, Any]] = None,
+        human_interventions: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """素材收集"""
         result = await self.agents["researcher"].process({
@@ -966,6 +1001,7 @@ class WriteFlow:
             "topic": topic,
             "observation_brief": observation_brief or {},
             "local_voice_brief": local_voice_brief or {},
+            "human_interventions": human_interventions or [],
             "material_types": ["data", "case", "theory", "quote", "history"],
             "depth_level": "deep",
         })
@@ -979,15 +1015,20 @@ class WriteFlow:
         observation_brief: Optional[Dict[str, Any]] = None,
         local_voice_brief: Optional[Dict[str, Any]] = None,
         novelty_feedback: Optional[Dict[str, Any]] = None,
+        human_interventions: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Build the core thesis brief before drafting."""
         result = await self.agents["thesis_architect"].process({
             "task_id": task_id,
             "topic": topic,
-            "materials": materials,
+            "materials": self._materials_with_human_interventions(
+                materials,
+                human_interventions,
+            ),
             "observation_brief": observation_brief or {},
             "local_voice_brief": local_voice_brief or {},
             "novelty_feedback": novelty_feedback or {},
+            "human_interventions": human_interventions or [],
         })
         known_fields = {
             "core_claim",
@@ -997,7 +1038,7 @@ class WriteFlow:
             "most_dangerous_counterargument",
             "novelty_assets",
         }
-        return {
+        thesis = {
             "core_claim": result.get("core_claim", ""),
             "conflict_with_common_view": result.get("conflict_with_common_view", ""),
             "common_sense_overturned": result.get("common_sense_overturned", ""),
@@ -1008,6 +1049,10 @@ class WriteFlow:
             "novelty_assets": result.get("novelty_assets", []),
             **{key: value for key, value in result.items() if key not in known_fields},
         }
+        preserved = self._observation_hard_requirements(observation_brief or {})
+        if preserved and not thesis.get("preserved_human_requirements"):
+            thesis["preserved_human_requirements"] = preserved
+        return thesis
 
     async def _run_real_novelty_gate(
         self,
@@ -1017,6 +1062,7 @@ class WriteFlow:
         local_voice_brief: Dict[str, Any],
         materials: List[Dict[str, Any]],
         thesis: Dict[str, Any],
+        human_interventions: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Run the one-vote novelty gate before drafting."""
         return await self.agents["real_novelty_gate"].process({
@@ -1024,8 +1070,12 @@ class WriteFlow:
             "topic": topic,
             "observation_brief": observation_brief,
             "local_voice_brief": local_voice_brief,
-            "materials": materials,
+            "materials": self._materials_with_human_interventions(
+                materials,
+                human_interventions,
+            ),
             "thesis": thesis,
+            "human_interventions": human_interventions or [],
         })
 
     async def _write_content(
@@ -1041,6 +1091,7 @@ class WriteFlow:
         round_num: int,
         previous_content: str,
         rewrite_feedback: Optional[Dict[str, Any]] = None,
+        human_interventions: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """写作阶段"""
         previous_rounds = []
@@ -1056,7 +1107,10 @@ class WriteFlow:
             "round": round_num,
             "mode": "write",
             "topic": topic,
-            "materials": materials,
+            "materials": self._materials_with_human_interventions(
+                materials,
+                human_interventions,
+            ),
             "thesis": thesis,
             "observation_brief": observation_brief,
             "local_voice_brief": local_voice_brief,
@@ -1064,6 +1118,7 @@ class WriteFlow:
             "depth_questions": depth_questions,
             "previous_rounds": previous_rounds,
             "rewrite_feedback": rewrite_feedback or {},
+            "human_interventions": human_interventions or [],
         })
         return result.get("content", "")
 
@@ -1081,6 +1136,7 @@ class WriteFlow:
         content: str,
         judge_feedback: Dict[str, Any],
         criticisms: List[Dict],
+        human_interventions: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """根据Judge和Devil Advocate反馈直接修订正文。"""
         result = await self.agents["writer"].process({
@@ -1088,7 +1144,10 @@ class WriteFlow:
             "round": round_num,
             "mode": "revision",
             "topic": topic,
-            "materials": materials,
+            "materials": self._materials_with_human_interventions(
+                materials,
+                human_interventions,
+            ),
             "thesis": thesis,
             "observation_brief": observation_brief,
             "local_voice_brief": local_voice_brief,
@@ -1097,6 +1156,7 @@ class WriteFlow:
             "content": content,
             "judge_feedback": judge_feedback,
             "criticisms": criticisms,
+            "human_interventions": human_interventions or [],
         })
         return result.get("content", content)
 
@@ -1108,6 +1168,7 @@ class WriteFlow:
         materials: List[Dict],
         round_num: int,
         debate_graph: DebateGraph,
+        human_interventions: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict]:
         """质疑阶段"""
         previous_criticisms = []
@@ -1120,8 +1181,12 @@ class WriteFlow:
             "round": round_num,
             "content": content,
             "topic": topic,
-            "materials": materials,
+            "materials": self._materials_with_human_interventions(
+                materials,
+                human_interventions,
+            ),
             "previous_criticisms": previous_criticisms,
+            "human_interventions": human_interventions or [],
         })
 
         criticisms = result.get("criticisms", [])
@@ -1199,6 +1264,7 @@ class WriteFlow:
         thesis: Optional[Dict[str, Any]] = None,
         novelty_assets: Optional[List[Dict[str, Any]]] = None,
         defenses: str = "",
+        human_interventions: Optional[List[Dict[str, Any]]] = None,
     ) -> tuple[GateResult, Dict[str, Any]]:
         """统一执行Depth Judge和Quality Gate。"""
         result = await self.agents["judge"].process({
@@ -1207,9 +1273,13 @@ class WriteFlow:
             "topic": topic,
             "criticisms": criticisms,
             "defenses": defenses,
-            "materials": materials,
+            "materials": self._materials_with_human_interventions(
+                materials,
+                human_interventions,
+            ),
             "thesis": thesis or {},
             "novelty_assets": novelty_assets or [],
+            "human_interventions": human_interventions or [],
         })
 
         scores = self._parse_scores_from_result(result)
@@ -1224,6 +1294,8 @@ class WriteFlow:
         content: str,
         scores: QualityScores,
         thesis: Optional[Dict[str, Any]] = None,
+        observation_brief: Optional[Dict[str, Any]] = None,
+        human_interventions: Optional[List[Dict[str, Any]]] = None,
     ) -> tuple[str, str]:
         """编辑阶段"""
         result = await self.agents["editor"].process({
@@ -1233,6 +1305,8 @@ class WriteFlow:
             "key_issues": scores.failed_dimensions(5.0),
             "criticisms": [],
             "thesis": thesis or {},
+            "observation_brief": observation_brief or {},
+            "human_interventions": human_interventions or [],
         })
         raw_content = result.get("content", content)
         return raw_content, clean_final_article(raw_content)
@@ -1371,7 +1445,90 @@ class WriteFlow:
         trace_events.append(event)
         trace_callback = getattr(trace_events, "trace_callback", None)
         if trace_callback is not None:
-            trace_callback(event)
+            feedback = trace_callback(event)
+            intervention = self._normalize_human_intervention(feedback, event)
+            interventions = getattr(trace_events, "human_interventions", None)
+            if intervention and interventions is not None:
+                interventions.append(intervention)
+
+    def _normalize_human_intervention(
+        self,
+        feedback: Any,
+        event: TraceEvent,
+    ) -> Optional[Dict[str, Any]]:
+        """Normalize optional live user feedback collected after a trace event."""
+        if not feedback:
+            return None
+        if isinstance(feedback, str):
+            content = feedback.strip()
+            raw: Dict[str, Any] = {}
+        elif isinstance(feedback, dict):
+            content = str(feedback.get("content", "") or "").strip()
+            raw = feedback
+        else:
+            return None
+        if not content:
+            return None
+        return {
+            "content": content,
+            "after_stage": str(raw.get("after_stage") or event.stage),
+            "after_agent": str(raw.get("after_agent") or event.agent),
+            "round": raw.get("round", event.round_number),
+            "attempt": raw.get("attempt", event.attempt),
+            "created_at": str(
+                raw.get("created_at")
+                or datetime.now(timezone.utc)
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z")
+            ),
+        }
+
+    def _human_interventions_prompt(self, interventions: List[Dict[str, Any]]) -> str:
+        if not interventions:
+            return ""
+        lines = ["【运行中人工补充】", "这些内容来自 Web 工作台，优先作为用户新增事实、方向或修改要求处理。"]
+        for index, item in enumerate(interventions[-8:], 1):
+            source = item.get("after_agent") or item.get("after_stage") or "unknown"
+            round_number = item.get("round")
+            suffix = f"，第 {round_number} 轮" if round_number is not None else ""
+            lines.append(f"{index}. 在 {source}{suffix} 之后补充：{item.get('content', '')}")
+        return "\n".join(lines)
+
+    def _observation_hard_requirements(
+        self,
+        observation_brief: Dict[str, Any],
+    ) -> List[str]:
+        requirements: List[str] = []
+        for key in (
+            "user_requirements",
+            "must_preserve_details",
+            "raw_human_observation",
+        ):
+            value = observation_brief.get(key)
+            if isinstance(value, list):
+                requirements.extend(str(item).strip() for item in value if str(item).strip())
+            elif value:
+                requirements.append(str(value).strip())
+        return requirements
+
+    def _materials_with_human_interventions(
+        self,
+        materials: List[Dict[str, Any]],
+        interventions: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        enriched = list(materials or [])
+        for item in (interventions or [])[-8:]:
+            content = str(item.get("content", "")).strip()
+            if not content:
+                continue
+            enriched.append(
+                {
+                    "material_type": "human_intervention",
+                    "source": "web_runtime_input",
+                    "content": content,
+                }
+            )
+        return enriched
 
     async def _emit_progress(
         self,

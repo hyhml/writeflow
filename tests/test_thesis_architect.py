@@ -53,3 +53,21 @@ def test_thesis_architect_falls_back_on_invalid_json():
     assert set(REQUIRED_THESIS_FIELDS).issubset(thesis.keys())
     assert thesis["core_claim"]
     assert "parse_warning" in thesis
+
+
+def test_thesis_architect_prompt_preserves_human_requirements():
+    agent = ThesisArchitectAgent.__new__(ThesisArchitectAgent)
+
+    prompt = agent._build_prompt(
+        topic="测试主题",
+        materials=[],
+        observation_brief={
+            "raw_human_observation": "不要写成温吞综述，必须保留现场怒气。",
+            "user_requirements": ["保留反讽语气"],
+            "must_preserve_details": ["地铁口冲突"],
+        },
+    )
+
+    assert "raw_human_observation 是用户原话或合并后的原始要求，必须读" in prompt
+    assert "不要写成温吞综述" in prompt
+    assert "preserved_human_requirements" in prompt

@@ -38,14 +38,18 @@ def test_observation_interviewer_normalizes_user_observation():
                 "intuitive_root_cause": "路权分配",
                 "concrete_solution": "划转车道",
                 "must_preserve_details": ["禁摩节点", "东西向通勤"],
+                "user_requirements": ["不要写成治理综述"],
             }
         },
         "深圳电动车治理",
+        human_observation="原始要求：文章必须保留现场愤怒感。",
     )
 
     assert result["missing_observation"] is False
     assert result["source_status"] == "user_provided"
     assert result["observation_brief"]["concrete_solution"] == "划转车道"
+    assert result["observation_brief"]["raw_human_observation"] == "原始要求：文章必须保留现场愤怒感。"
+    assert "不要写成治理综述" in result["must_preserve"]
 
 
 def test_local_voice_collector_without_search_does_not_fabricate_quotes(monkeypatch):
