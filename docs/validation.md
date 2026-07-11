@@ -321,3 +321,36 @@ python -m ruff check .
 | ruff | ✅ All checks passed |
 
 **结论**：`python3 write.py "中考分流" -o` 不再需要额外加 `--live`，即可打印进度并写入状态文件。
+
+## v0.2.11 (2026-07-11)
+
+**目标**：新增 `--interview` 交互式 Observation Interview，让 Claude Code / WSL 终端可以在正式生成前先向用户询问本地观察，再根据回答生成 2-3 个补充追问，并把合并后的观察材料传入 `WriteFlow.write(context={"human_observation": ...})`。
+
+**验证命令**：
+```bash
+python -m compileall -q write.py src tests
+python -m pytest -q
+python -m ruff check .
+```
+
+**运行结果**：
+| 项目 | 状态 |
+|------|------|
+| 版本号 | 0.2.11 |
+| 编译检查 | 通过 |
+| pytest | 64 passed |
+| ruff | All checks passed |
+
+**新增用法**：
+```bash
+python3 write.py "中考分流" -o --interview
+python3 write.py "深圳电动车治理" -o --interview --live
+```
+
+**新增输出**：
+```text
+outputs/<主题>_<时间>_interview.json
+outputs/<主题>_<时间>_interview.md
+```
+
+**结论**：v0.2.11 只改输入界面层，不改 Depth Judge 或 Writer loop。`--interview` 会先收集人类观察，全部空答时停止生成，避免在缺少观察材料时继续空转。

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "writeflow"
-version = "0.2.10"
+version = "0.2.11"
 description = "支持 DeepSeek/MiniMax/Anthropic 的批判性深度稿件多Agent生产系统"
 readme = "README.md"
 requires-python = ">=3.10"

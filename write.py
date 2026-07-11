@@ -14,6 +14,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 from writeflow import WriteFlow
 from writeflow.agents.llm_client import ModelClientError
 from writeflow.config import get_settings, validate_runtime_settings
+from writeflow.interview import (
+    interview_json_path_for,
+    interview_markdown_path_for,
+    run_interactive_interview,
+    save_interview_record,
+)
 from writeflow.output import (
     AUTO_OUTPUT,
     build_output_paths,
@@ -89,6 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="显示实时 Agent 进度；使用 -o 时会默认开启并保存 _status.json 和 _status.jsonl",
     )
+    parser.add_argument(
+        "--interview",
+        action="store_true",
+        help="生成前进入终端交互式 Observation Interview：先问人，再写文章",
+    )
     return parser
 
 
@@ -136,6 +147,33 @@ async def main() -> int:
     trace_path = output_paths.trace
     status_path = output_paths.status
     status_log_path = output_paths.status_log
+
+    if args.interview:
+        try:
+            interview_record = await run_interactive_interview(
+                topic,
+                preset_observation=human_observation,
+            )
+        except EOFError:
+            print("Observation Interview 没有收到终端输入，已停止。")
+            return 1
+        except ModelClientError as exc:
+            print(f"Observation Interview 追问生成失败: {exc}")
+            return 1
+
+        if not interview_record.get("has_observation"):
+            print("缺少人类观察，建议补充后再生成。")
+            return 1
+
+        human_observation = str(interview_record.get("human_observation", "")).strip()
+        if article_path:
+            interview_json, interview_md = save_interview_record(
+                interview_record,
+                interview_json_path_for(article_path),
+                interview_markdown_path_for(article_path),
+            )
+            print(f"Observation Interview 已保存到: {interview_json}")
+            print(f"Observation Interview Markdown 已保存到: {interview_md}")
 
     print(f"正在为主题《{topic}》创作批判性文章...")
     print(f"Provider: {settings.provider} | Model: {settings.model}")

@@ -176,3 +176,140 @@ def test_write_py_passes_observation_file_to_context(monkeypatch, tmp_path):
 
     assert exit_code == 0
     assert DummyWriteFlow.context_seen == {"human_observation": "本地观察内容"}
+
+
+def test_write_py_interview_passes_answers_to_context_and_saves_sidecars(
+    monkeypatch,
+    tmp_path,
+):
+    output_path = tmp_path / "article.md"
+    monkeypatch.setenv("WRITEFLOW_PROVIDER", "minimax")
+    monkeypatch.setenv("MINIMAX_API_KEY", "fake-key")
+    monkeypatch.delenv("WRITEFLOW_API_KEY", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["write.py", "测试主题", "-o", str(output_path), "--interview"],
+    )
+    config.reset_settings_cache()
+    monkeypatch.setattr(config, "_dotenv_loaded", True)
+
+    module = load_write_module()
+    DummyWriteFlow.context_seen = None
+    monkeypatch.setattr(module, "WriteFlow", lambda: DummyWriteFlow())
+
+    async def fake_interview(topic, *, preset_observation=""):
+        return {
+            "topic": topic,
+            "created_at": "2026-07-11T00:00:00Z",
+            "preset_observation": preset_observation,
+            "fixed_answers": [
+                {
+                    "kind": "fixed",
+                    "index": 1,
+                    "question": "我在本地看到的反常现象是什么？",
+                    "answer": "反常现象",
+                }
+            ],
+            "followup_questions": [],
+            "followup_answers": [],
+            "human_observation": "反常现象",
+            "has_observation": True,
+        }
+
+    monkeypatch.setattr(module, "run_interactive_interview", fake_interview)
+
+    exit_code = asyncio.run(module.main())
+
+    assert exit_code == 0
+    assert DummyWriteFlow.context_seen == {"human_observation": "反常现象"}
+    assert (tmp_path / "article_interview.json").exists()
+    assert (tmp_path / "article_interview.md").exists()
+
+
+def test_write_py_interview_prefills_existing_observation(monkeypatch, tmp_path):
+    output_path = tmp_path / "article.md"
+    observation_file = tmp_path / "observation.txt"
+    observation_file.write_text("已有观察", encoding="utf-8")
+    monkeypatch.setenv("WRITEFLOW_PROVIDER", "minimax")
+    monkeypatch.setenv("MINIMAX_API_KEY", "fake-key")
+    monkeypatch.delenv("WRITEFLOW_API_KEY", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "write.py",
+            "测试主题",
+            "-o",
+            str(output_path),
+            "--observation-file",
+            str(observation_file),
+            "--interview",
+        ],
+    )
+    config.reset_settings_cache()
+    monkeypatch.setattr(config, "_dotenv_loaded", True)
+
+    module = load_write_module()
+    DummyWriteFlow.context_seen = None
+    monkeypatch.setattr(module, "WriteFlow", lambda: DummyWriteFlow())
+    seen = {}
+
+    async def fake_interview(topic, *, preset_observation=""):
+        seen["preset_observation"] = preset_observation
+        return {
+            "topic": topic,
+            "created_at": "2026-07-11T00:00:00Z",
+            "preset_observation": preset_observation,
+            "fixed_answers": [],
+            "followup_questions": [],
+            "followup_answers": [],
+            "human_observation": f"{preset_observation}\n补充观察",
+            "has_observation": True,
+        }
+
+    monkeypatch.setattr(module, "run_interactive_interview", fake_interview)
+
+    exit_code = asyncio.run(module.main())
+
+    assert exit_code == 0
+    assert seen["preset_observation"] == "已有观察"
+    assert DummyWriteFlow.context_seen == {"human_observation": "已有观察\n补充观察"}
+
+
+def test_write_py_interview_blank_answers_stop_before_generation(monkeypatch, tmp_path):
+    output_path = tmp_path / "article.md"
+    monkeypatch.setenv("WRITEFLOW_PROVIDER", "minimax")
+    monkeypatch.setenv("MINIMAX_API_KEY", "fake-key")
+    monkeypatch.delenv("WRITEFLOW_API_KEY", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["write.py", "测试主题", "-o", str(output_path), "--interview"],
+    )
+    config.reset_settings_cache()
+    monkeypatch.setattr(config, "_dotenv_loaded", True)
+
+    module = load_write_module()
+    DummyWriteFlow.context_seen = None
+    monkeypatch.setattr(module, "WriteFlow", lambda: DummyWriteFlow())
+
+    async def fake_interview(topic, *, preset_observation=""):
+        return {
+            "topic": topic,
+            "created_at": "2026-07-11T00:00:00Z",
+            "preset_observation": "",
+            "fixed_answers": [],
+            "followup_questions": [],
+            "followup_answers": [],
+            "human_observation": "",
+            "has_observation": False,
+        }
+
+    monkeypatch.setattr(module, "run_interactive_interview", fake_interview)
+
+    exit_code = asyncio.run(module.main())
+
+    assert exit_code == 1
+    assert DummyWriteFlow.context_seen is None
+    assert not (tmp_path / "article_interview.json").exists()
